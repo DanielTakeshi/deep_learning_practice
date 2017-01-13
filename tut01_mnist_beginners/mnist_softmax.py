@@ -83,7 +83,9 @@ def main(_):
     # the feed_dict which provides the data. I will be seeing a lot of that! The
     # accuracy is 0.9063.
     sess = tf.InteractiveSession()
-    tf.global_variables_initializer().run()
+    sess.run(tf.global_variables_initializer())
+    # Above command is equivalent to: tf.global_variables_initializer().run()
+    # because an Interactivesession() lets us do operation.run().
 
     for _ in range(1000):
         batch_xs, batch_ys = mnist.train.next_batch(100)
