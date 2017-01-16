@@ -1,10 +1,13 @@
 """
 My first attempt in learning Keras. This is so much easier than using default
 TensorFlow so let me try using this for DQN. WOW, they have a long list of
-examples on their GitHub. This is really helpful. I get:
+examples on their GitHub. This is really helpful. I get for instance:
 
 Test score: 0.100619024031
 Test accuracy: 0.9846
+
+For more on the actual API documentation, see:
+    https://keras.io/layers/core/
 """
 
 from __future__ import print_function
