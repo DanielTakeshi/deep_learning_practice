@@ -17,7 +17,7 @@ placeholders to keep track of the data size and to catch bugs.
 
 sess = tf.Session() vs sess = tf.InteractiveSession(), looks like I should use
 the second one because that's less typing, I don't need to do sess.run(...) but
-can do (...).eval() and I think (...).run(), and I use (...).run() in the firs
+can do (...).eval() and I think (...).run(), and I use (...).run() in the first
 two tutorials. But InteractiveSession() was apparently designed for IPython and
 Jupyter Notebooks, but I'm not seeing the advantage of Session() over
 InteractiveSession(). I'll have to revisit this out later. EDIT: maybe
@@ -43,6 +43,12 @@ weights, but those are typically in every layer of the net, so there's potential
 for name clashes. Note: I can do a name_scope block, start a new one (_not_
 nested in it but a new one at the same indentation level) and can still refer to
 the previous variables generated. Nice!
+
+Recurrent neural nets: a lot of this is just copying their code as usual.
+However, I had to put in some manual fixes as shown by others. See:
+https://github.com/tensorflow/models/pull/824/commits/a6082b5463840b0840dcf545366dca85966c5ae1
+EDIT: never mind, I gave up, I upgraded to Tensorflow v1.0. Now things seem to
+be running ... but wow, this is SLOW. Even for the small model. =(
 
 Custom format data: TODO
 
