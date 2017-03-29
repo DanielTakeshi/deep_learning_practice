@@ -4,15 +4,15 @@ here. The convolutions are not as hard as they could be because the number of
 channels is one, rather than the usual three. See detailed comments below. The
 outcome of my code is:
 
-test accuracy 0.9923
+    test accuracy 0.9918
 
-real    1m13.191s
-user    1m31.808s
-sys     0m12.328s
+    real    1m10.899s
+    user    1m27.124s
+    sys     0m12.244s
 
-So yes, I get the 0.9923 accuracy just as the write-up suggested. But, wow, my
-computer is really good ... 1 minute, 13 seconds to run this, and the write-up
-suggested it could have taken a hour for all 20k iterations.
+So yes, I get the accuracy as suggested by the write-up. Wow, my computer is
+really good ... 1 minute, 10 seconds to run this, and the write-up suggested it
+could have taken a hour for all 20k iterations.
 """
 
 from __future__ import print_function
@@ -54,7 +54,7 @@ def max_pool_2x2(x):
 
 if __name__ == "__main__":
     """
-    We have to reshape x becuase before it was shaped [None,784]. The first
+    We have to reshape x because before it was shaped [None,784]. The first
     dimension is the batch size but we can leave the -1 as a placeholder for a
     size to be determined later.
 
@@ -111,7 +111,8 @@ if __name__ == "__main__":
 
     # Now we can train and test. Looks like we use accuracy.eval now, before we
     # just ran a session with accuracy as input ...
-    cross_entropy = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(y_conv, y_))
+    cross_entropy = tf.reduce_mean(
+            tf.nn.softmax_cross_entropy_with_logits(labels=y_, logits=y_conv))
     train_step = tf.train.AdamOptimizer(1e-4).minimize(cross_entropy)
     correct_prediction = tf.equal(tf.argmax(y_conv,1), tf.argmax(y_,1))
     accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
@@ -126,6 +127,5 @@ if __name__ == "__main__":
                 feed_dict = {x:batch[0], y_: batch[1], keep_prob: 1.0})
             print("step %d, training accuracy %g"%(i, train_accuracy))
         train_step.run(feed_dict={x: batch[0], y_: batch[1], keep_prob: 0.5})
-
     print("test accuracy %g"%accuracy.eval(
         feed_dict = {x: mnist.test.images, y_: mnist.test.labels, keep_prob: 1.0}))

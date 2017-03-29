@@ -64,7 +64,7 @@ def main(_):
     # the result is a [None,10] matrix with one nonzero in each row, then
     # tf.reduce_sum will turn that into a simple vector by summation.
     #
-    # cross_entroy = tf.reduce_mean(
+    # cross_entropy = tf.reduce_mean(
     #     -tf.reduce_sum(y_ * tf.log(y), reduction_indices=[1]))
     #
     # Use a more numerically stable version of it. (NOTE: It looks like it will
