@@ -20,6 +20,7 @@ import tensorflow as tf
 import argparse
 import sys
 from tensorflow.examples.tutorials.mnist import input_data
+import numpy as np
 FLAGS = None
 
 
@@ -108,6 +109,11 @@ if __name__ == "__main__":
     W_fc2 = weight_variable([1024,10])
     b_fc2 = bias_variable([10])
     y_conv = tf.matmul(h_fc1_drop, W_fc2) + b_fc2
+
+    weights = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES) 
+    for w in weights:
+        shp = w.get_shape().as_list()
+        print("- {} shape:{} size:{}".format(w.name, shp, np.prod(shp)))
 
     # Now we can train and test. Looks like we use accuracy.eval now, before we
     # just ran a session with accuracy as input ...
