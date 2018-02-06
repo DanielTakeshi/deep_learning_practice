@@ -20,16 +20,15 @@ def get_tf_session(gpumem):
 
 class Evaluator:
 
-    def __init__(self, burn_in_epochs, num_labels, ylabels):
+    def __init__(self, burn_in_epochs, ylabels):
         """ The input `ylabels` is in one-hot form. """
         self.burn_in_epochs = burn_in_epochs
-        self.num_labels = num_labels
+        self.num_labels = ylabels.shape[0]
         self.rcounter = 0
         self.num_rounds_averaged = 0
-        self.o_pred = np.zeros((num_labels,10))
+        self.o_pred = np.zeros((self.num_labels,10))
         self.y_labels = np.argmax(ylabels, axis=1)
         assert len(self.y_labels.shape) == 1
-        assert self.y_labels.shape[0] == num_labels
 
     def _get_alpha(self):
         if self.rcounter < self.burn_in_epochs:
@@ -56,6 +55,9 @@ class Classifier:
         self.args = args
         self.sess = sess
         self.mnist = input_data.read_data_sets(args.data_dir, one_hot=True)
+        assert self.mnist.train.labels.shape[0] == args.num_train
+        assert self.mnist.validation.labels.shape[0] == args.num_valid
+        assert self.mnist.test.labels.shape[0] == args.num_test
 
         # Placeholders and network output.
         self.x = tf.placeholder(tf.float32, [None, 784])
@@ -83,12 +85,8 @@ class Classifier:
             'l2_loss': self.l2_loss,
             'y_softmax': self.y_softmax,
         }
-        self.eval_valid = Evaluator(args.burn_in_epochs,
-                                    args.num_valid,
-                                    self.mnist.validation.labels)
-        self.eval_test  = Evaluator(args.burn_in_epochs,
-                                    args.num_test,
-                                    self.mnist.test.labels)
+        self.eval_valid = Evaluator(args.burn_in_epochs, self.mnist.validation.labels)
+        self.eval_test  = Evaluator(args.burn_in_epochs, self.mnist.test.labels)
         self.sess.run(tf.global_variables_initializer())
         self.debug()
 
@@ -154,8 +152,8 @@ class Classifier:
         """
         args = self.args
         mnist = self.mnist
-        feed_test = {self.x: mnist.test.images, self.y: mnist.test.labels}
         feed_valid = {self.x: mnist.validation.images, self.y: mnist.validation.labels}
+        feed_test = {self.x: mnist.test.images, self.y: mnist.test.labels}
         print("epoch | l2_loss (v) | ce_loss (v) | valid_err (s) | valid_err (m) | test_err (s) | test_err (m)")
 
         for ep in range(args.num_epochs):
@@ -185,7 +183,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=1)
     # Training and evaluation, stuff that should stay mostly constant:
     parser.add_argument('--batch_size', type=int, default=100)
-    parser.add_argument('--num_epochs', type=int, default=100)
+    parser.add_argument('--num_epochs', type=int, default=200) # just run longer
     parser.add_argument('--momentum', type=float, default=0.99)
     # Training and evaluation, stuff to mostly tune:
     parser.add_argument('--burn_in_epochs', type=int, default=20)
