@@ -70,7 +70,7 @@ class Classifier:
 
         self.x = tf.placeholder(tf.float32, [None, 784])
         self.y = tf.placeholder(tf.float32, [None, 10])
-        self.y_logits = self.make_ff(self.x) # TODO handle cnn case later
+        self.y_logits = self.make_network(self.x)
         self.cross_entropy = tf.reduce_mean(
             tf.nn.softmax_cross_entropy_with_logits(labels=self.y, logits=self.y_logits)
         )
@@ -88,11 +88,23 @@ class Classifier:
 
 
     def get_optimizer(self):
-        name = (self.args.optimizer).lower()
+        args = self.args
+        name = (args.optimizer).lower()
         if name == 'sgd':
-            tf.train.GradientDescentOptimizer(args.lrate)
+            return tf.train.GradientDescentOptimizer(args.lrate)
+        elif name == 'momsgd':
+            return tf.train.MomentumOptimizer(args.lrate, momentum=0.99)
         elif name == 'rmsprop':
-            tf.train.RMSPropOptimizer(args.lrate)
+            return tf.train.RMSPropOptimizer(args.lrate)
+        else:
+            raise ValueError()
+
+
+    def make_network(self, x):
+        if self.args.net_type == 'ff':
+            return self.make_ff(x)
+        elif self.args.net_type == 'cnn':
+            return self.make_cnn(x)
         else:
             raise ValueError()
 
@@ -104,13 +116,37 @@ class Classifier:
         print("(End of debug prints)\n")
 
 
+    def make_ff(self, x):
+        size = self.args.fc_size
+        with tf.variable_scope('ff'):
+            x = tf.nn.relu( tf.keras.layers.Dense(size)(x) )
+            x = tf.nn.relu( tf.keras.layers.Dense(size)(x) )
+            x = tf.keras.layers.Dense(10)(x)
+            return x
+
+
+    def make_cnn(self, x):
+        x = tf.transpose(tf.reshape(x, [-1, 1, 28, 28]), [0, 2, 3, 1])
+        with tf.variable_scope('cnn'):
+            x = tf.keras.layers.Conv2D(filters=32, kernel_size=[5,5], padding='SAME')(x)
+            x = tf.nn.relu(x)
+            x = tf.keras.layers.MaxPool2D(pool_size=[2,2])(x) # shape = (?, 14, 14, 32)
+            x = tf.keras.layers.Conv2D(filters=64, kernel_size=[5,5], padding='SAME')(x)
+            x = tf.nn.relu(x)
+            x = tf.keras.layers.MaxPool2D(pool_size=[2,2])(x) # shape = (?, 7, 7, 64)
+            x = tf.keras.layers.Flatten()(x) # shape = (?, 7*7*64) = (?, 3136)
+            x = tf.nn.relu( tf.keras.layers.Dense(200)(x) )
+            x = tf.nn.relu( tf.keras.layers.Dense(200)(x) )
+            x = tf.keras.layers.Dense(10)(x)
+            return x
+
+
     def train(self):
         """ 
         Note that by default, `shuffle=True` for `next_batch` but this is fine,
         the code internally shuffles for the first epoch but goes through
         elements sequentially, as I'd expect.
         """
-        # TODO: model averaging!
         args = self.args
         mnist = self.mnist
         stuff = [self.accuracy, self.cross_entropy, self.l2_loss]
@@ -126,31 +162,6 @@ class Classifier:
             acc, ce_loss, l2_loss = self.sess.run(stuff, feed)
             print("{:5} {:9.4f} {:9.4f} {:10.2f} {:12.2f}".format(
                     ep, l2_loss, ce_loss, 100*(1-acc), 100*(1-acc)))
-
-
-    def make_ff(self, x):
-        size = self.args.fc_size
-        with tf.variable_scope('ff'):
-            x = tf.nn.relu( tf.keras.layers.Dense(size)(x) )
-            x = tf.nn.relu( tf.keras.layers.Dense(size)(x) )
-            x = tf.keras.layers.Dense(10)(x)
-            return x
-
-
-    def make_cnn(self, x):
-        #with tf.variable_scope('cnn'):
-        #    x = tf.keras.layers.Conv2D(filters=32, kernel_size=[5,5], padding='SAME')(x)
-        #    x = tf.nn.relu(x)
-        #    x = tf.keras.layers.MaxPool2D(pool_size=[2,2])(x) # shape = (?, 14, 14, 32)
-        #    x = tf.keras.layers.Conv2D(filters=64, kernel_size=[5,5], padding='SAME')(x)
-        #    x = tf.nn.relu(x)
-        #    x = tf.keras.layers.MaxPool2D(pool_size=[2,2])(x) # shape = (?, 7, 7, 64)
-        #    x = tf.keras.layers.Flatten()(x) # shape = (?, 7*7*64) = (?, 3136)
-        #    x = tf.nn.relu( tf.keras.layers.Dense(1024)(x) )
-        #    x = tf.keras.layers.Dense(output_size)(x)
-        #    x = tf.nn.log_softmax(x) # shape = (?, 2)
-        #    return x
-        pass
 
 
 if __name__ == '__main__':
