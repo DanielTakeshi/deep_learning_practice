@@ -20,18 +20,19 @@ def get_tf_session(gpumem):
 
 class Evaluator:
 
-    def __init__(self, args, ylabels):
+    def __init__(self, burn_in_epochs, num_labels, ylabels):
         """ The input `ylabels` is in one-hot form. """
-        self.args = args
+        self.burn_in_epochs = burn_in_epochs
+        self.num_labels = num_labels
         self.rcounter = 0
         self.num_rounds_averaged = 0
-        self.o_pred = np.zeros((args.num_test,10))
+        self.o_pred = np.zeros((num_labels,10))
         self.y_labels = np.argmax(ylabels, axis=1)
         assert len(self.y_labels.shape) == 1
-        assert self.y_labels.shape[0] == args.num_test
+        assert self.y_labels.shape[0] == num_labels
 
     def _get_alpha(self):
-        if self.rcounter < self.args.burn_in_epochs:
+        if self.rcounter < self.burn_in_epochs:
             return 1.0
         else:
             self.num_rounds_averaged += 1
@@ -45,7 +46,7 @@ class Evaluator:
         self.o_pred[:] += alpha * y_softmax
         y_pred = np.argmax(self.o_pred, axis=1)
         num_correct = np.sum( np.equal(y_pred, self.y_labels) )
-        return 100 * (1 - (num_correct / float(args.num_test)))
+        return 100 * (1 - (num_correct / float(self.num_labels)))
 
 
 class Classifier:
@@ -82,7 +83,12 @@ class Classifier:
             'l2_loss': self.l2_loss,
             'y_softmax': self.y_softmax,
         }
-        self.nneval = Evaluator(args, self.mnist.test.labels)
+        self.eval_valid = Evaluator(args.burn_in_epochs,
+                                    args.num_valid,
+                                    self.mnist.validation.labels)
+        self.eval_test  = Evaluator(args.burn_in_epochs,
+                                    args.num_test,
+                                    self.mnist.test.labels)
         self.sess.run(tf.global_variables_initializer())
         self.debug()
 
@@ -149,8 +155,8 @@ class Classifier:
         args = self.args
         mnist = self.mnist
         feed_test = {self.x: mnist.test.images, self.y: mnist.test.labels}
-        print("burn_in epochs: {}".format(args.burn_in_epochs))
-        print("epoch | l2_loss | ce_loss | test_err (single) | test_err (model)")
+        feed_valid = {self.x: mnist.validation.images, self.y: mnist.validation.labels}
+        print("epoch | l2_loss (v) | ce_loss (v) | valid_err (s) | valid_err (m) | test_err (s) | test_err (m)")
 
         for ep in range(args.num_epochs):
             num_mbs = int(args.num_train / args.batch_size)
@@ -158,12 +164,18 @@ class Classifier:
                 batch = mnist.train.next_batch(args.batch_size)
                 feed = {self.x: batch[0], self.y: batch[1]}
                 self.sess.run(self.train_step, feed)
-            stats = self.sess.run(self.stats, feed_test)
-            err_single = 100*(1.0-stats['accuracy'])
-            err_model = self.nneval.eval(stats['y_softmax'])
-            print("{:5} {:9.4f} {:9.4f} {:10.2f} {:12.2f}".format(ep,
-                    stats['l2_loss'], stats['cross_entropy'], err_single,
-                    err_model))
+            valid_stats = self.sess.run(self.stats, feed_valid)
+            test_stats  = self.sess.run(self.stats, feed_test)
+
+            valid_err_single = 100*(1.0-valid_stats['accuracy'])
+            valid_err_model  = self.eval_valid.eval(valid_stats['y_softmax'])
+            test_err_single  = 100*(1.0-test_stats['accuracy'])
+            test_err_model   = self.eval_test.eval(test_stats['y_softmax'])
+
+            print("{:5} {:9.4f} {:9.4f} {:10.3f} {:10.3f} {:10.3f} {:10.3f}".format(ep,
+                    valid_stats['l2_loss'], valid_stats['cross_entropy'],
+                    valid_err_single, valid_err_model,
+                    test_err_single, test_err_model))
 
 
 if __name__ == '__main__':
@@ -171,20 +183,23 @@ if __name__ == '__main__':
     # Bells and whistles
     parser.add_argument('--data_dir', type=str, default='/tmp/tensorflow/mnist/input_data')
     parser.add_argument('--seed', type=int, default=1)
-    # Training and evaluation
+    # Training and evaluation, stuff that should stay mostly constant:
     parser.add_argument('--batch_size', type=int, default=100)
-    parser.add_argument('--burn_in_epochs', type=int, default=10)
-    parser.add_argument('--lrate', type=float, default=0.01)
-    parser.add_argument('--l2_reg', type=float, default=0.0)
     parser.add_argument('--num_epochs', type=int, default=100)
-    parser.add_argument('--optimizer', type=str, default='sgd')
     parser.add_argument('--momentum', type=float, default=0.99)
-    # Network and data
+    # Training and evaluation, stuff to mostly tune:
+    parser.add_argument('--burn_in_epochs', type=int, default=20)
+    parser.add_argument('--lrate', type=float, default=0.2)
+    parser.add_argument('--l2_reg', type=float, default=0.0)
+    parser.add_argument('--optimizer', type=str, default='sgd')
+    # Network and data. the 784-400-400-10 seems a common benchmark.
     parser.add_argument('--fc_size', type=int, default=400)
     parser.add_argument('--net_type', type=str, default='ff')
     parser.add_argument('--num_test', type=int, default=10000)
-    parser.add_argument('--num_train', type=int, default=60000)
+    parser.add_argument('--num_train', type=int, default=55000)
+    parser.add_argument('--num_valid', type=int, default=5000)
     args = parser.parse_args()
+    print("Our arguments:\n{}".format(args))
 
     sess = get_tf_session(gpumem=1.0)
     np.random.seed(args.seed)
