@@ -3,3 +3,4 @@
 *.pyc
 *.tgz
 data
+mnist_testing/figures/
