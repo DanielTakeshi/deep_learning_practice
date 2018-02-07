@@ -3,9 +3,8 @@ Plots results. Adjust names from `plot_names.py`. Assumes ordering:
 
 epoch | l2_loss (v) | ce_loss (v) | valid_err (s) | valid_err (m) | test_err (s) | test_err (m)
 
-for each line
+for each line. This is for plotting 'coarse' tuning.
 """
-
 import argparse, matplotlib, os, pickle, sys
 matplotlib.use('Agg')
 matplotlib.rcParams['axes.color_cycle'] = ['red', 'blue', 'yellow', 'black', 'purple']
@@ -18,14 +17,18 @@ from collections import defaultdict
 # Some matplotlib settings.
 plt.style.use('seaborn-darkgrid')
 error_region_alpha = 0.20
-LOGDIR = 'experiments/logs/'
-FIGDIR = 'experiments/figures/'
 title_size = 22
 tick_size = 18
 legend_size = 18
 ysize = 20
 xsize = 20
 lw, ms = 3, 8
+
+# ADJUST
+HPARAMS = {
+    'lrate': [0.01, 0.05, 0.1, 0.3, 0.5],
+    'wd':    [0.0, 0.000001, 0.00001, 0.0001, 0.001],
+}
 
 
 def parse(file_head, headname, dirs):
@@ -80,7 +83,8 @@ def parse(file_head, headname, dirs):
 def plot_one_type_5x5(headname, lrates, figname):
     """
     First column, validation, second test.  Assumes we did 5x5 evaluation of
-    learning rates and weight decays. The 5x5 isn't the number of subplots.
+    learning rates and weight decays. We'll have 5x5 columns, so it will be a
+    lot of information to process. We'll have to form a ranking.
     """
     dirs = sorted([e for e in os.listdir(headname) if 'seed' in e])
     unique_dirs = sorted( list( set([x[:-1].replace('seed-','') for x in dirs]) ) )
@@ -143,6 +147,5 @@ def plot_one_type_5x5(headname, lrates, figname):
 
 
 if __name__ == "__main__":
-    lrates = {'0.01':0, '0.05':1, '0.1':2, '0.3':3, '0.5':4}
-    plot_one_type_5x5('logs/sgd-tune/',    lrates, "figures/tune_sgd_coarse.png")
-    plot_one_type_5x5('logs/momsgd-tune/', lrates, "figures/tune_momsgd_coarse.png")
+    plot_one_type_5x5('logs/sgd-tune/',    "figures/tune_sgd_coarse.png")
+    plot_one_type_5x5('logs/momsgd-tune/', "figures/tune_momsgd_coarse.png")
