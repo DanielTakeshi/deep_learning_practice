@@ -97,9 +97,14 @@ class Classifier:
         if name == 'sgd':
             return tf.train.GradientDescentOptimizer(args.lrate)
         elif name == 'momsgd':
-            return tf.train.MomentumOptimizer(args.lrate, momentum=args.momentum)
+            return tf.train.MomentumOptimizer(args.lrate,
+                    momentum=args.momsgd_momentum)
         elif name == 'rmsprop':
-            return tf.train.RMSPropOptimizer(args.lrate)
+            return tf.train.RMSPropOptimizer(args.lrate,
+                    decay=args.rmsprop_decay,
+                    momentum=args.rmsprop_momentum)
+        elif name == 'adam':
+            return tf.train.AdamOptimizer(args.lrate)
         else:
             raise ValueError()
 
@@ -154,6 +159,7 @@ class Classifier:
         mnist = self.mnist
         feed_valid = {self.x: mnist.validation.images, self.y: mnist.validation.labels}
         feed_test = {self.x: mnist.test.images, self.y: mnist.test.labels}
+        print('------------------------')
         print("epoch | l2_loss (v) | ce_loss (v) | valid_err (s) | valid_err (m) | test_err (s) | test_err (m)")
 
         for ep in range(args.num_epochs):
@@ -183,10 +189,12 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=1)
     # Training and evaluation, stuff that should stay mostly constant:
     parser.add_argument('--batch_size', type=int, default=100)
-    parser.add_argument('--num_epochs', type=int, default=200) # just run longer
-    parser.add_argument('--momentum', type=float, default=0.99)
+    parser.add_argument('--num_epochs', type=int, default=300) # just run longer
+    parser.add_argument('--momsgd_momentum', type=float, default=0.99)
+    parser.add_argument('--rmsprop_decay', type=float, default=0.9)
+    parser.add_argument('--rmsprop_momentum', type=float, default=0.0)
     # Training and evaluation, stuff to mostly tune:
-    parser.add_argument('--burn_in_epochs', type=int, default=20)
+    parser.add_argument('--burn_in_epochs', type=int, default=30)
     parser.add_argument('--lrate', type=float, default=0.2)
     parser.add_argument('--l2_reg', type=float, default=0.0)
     parser.add_argument('--optimizer', type=str, default='sgd')
