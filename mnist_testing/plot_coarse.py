@@ -1,5 +1,5 @@
 """
-Plots results. Adjust names from `plot_names.py`. Assumes ordering:
+Plots results. Adjust names from `plot_names.py` if desired. Assumes ordering:
 
 epoch | l2_loss (v) | ce_loss (v) | valid_err (s) | valid_err (m) | test_err (s) | test_err (m)
 
@@ -23,12 +23,9 @@ legend_size = 18
 ysize = 20
 xsize = 20
 lw, ms = 3, 8
-
-# ADJUST
-HPARAMS = {
-    'lrate': ['0.01', '0.05', '0.1', '0.3', '0.5'],
-    'wd':    ['0.0', '0.000001', '0.00001', '0.0001', '0.001'],
-}
+# Adjust based on what we did with the scripts
+BURN_IN = 30
+EPOCHS = 300
 
 
 def parse(file_head, headname, dirs):
@@ -80,7 +77,7 @@ def parse(file_head, headname, dirs):
     return info
 
 
-def get_row_index(head):
+def get_row_index(head, HPARAMS):
     num_lr = len(HPARAMS['lrate'])
     num_wd = len(HPARAMS['wd'])
     for idx,lr in enumerate(HPARAMS['lrate']):
@@ -107,27 +104,27 @@ def axarr_plot(axarr, row, col, xcoords, mean, std, name):
             alpha=error_region_alpha)
 
 
-def plot_one_type(headname, figname):
+def plot_one_type(headname, figname, hparams):
     """
     First column, validation, second test. There is a lot of information to
     process. We'll have to form a ranking and add to the plot titles.
     """
     dirs = sorted([e for e in os.listdir(headname) if 'seed' in e])
     unique_dirs = sorted( list( set([x[:-1].replace('seed-','') for x in dirs]) ) )
-    print("\nPlotting one figure with {} files".format(len(dirs)))
-    print("and {} unique stems".format(len(unique_dirs)))
-    nrows = len(HPARAMS['lrate']) * len(HPARAMS['wd'])
+    nrows = len(hparams['lrate']) * len(hparams['wd'])
     ncols = 2
     fig,ax = plt.subplots(nrows, ncols, figsize=(10*ncols,10*nrows))
+    print("\nPlotting figure with {} files, {} stems, and {} rows".format(
+        len(dirs), len(unique_dirs), nrows))
 
     # Let's first get *validation rankings* for these (shouldn't be using test).
     LIM1 = 100-1
-    LIM2 = 200-1
+    LIM2 = EPOCHS-1
     ranks = defaultdict(list)
 
     for head in unique_dirs:
         info = parse(head, headname, dirs)
-        row = get_row_index(head)
+        row = get_row_index(head, hparams)
         print("Currently on head {} w/row idx {}".format(head, row))
 
         # Validation, 100.
@@ -150,22 +147,22 @@ def plot_one_type(headname, figname):
     # Now loop again to plot, this time using the rankings we've stored.
     for head in unique_dirs:
         info = parse(head, headname, dirs)
-        row = get_row_index(head)
+        row = get_row_index(head, hparams)
 
         # Validation, single and model.
-        valid_s_info = "single-ep100-{:.3f}-ep200-{:.3f}".format(
-            info['valid_err_s_mean'][LIM1], info['valid_err_s_mean'][LIM2],
+        valid_s_info = "single-ep{}-{:.3f}-ep{}-{:.3f}".format(
+            LIM1+1, info['valid_err_s_mean'][LIM1], EPOCHS, info['valid_err_s_mean'][LIM2],
         )
-        valid_m_info = "model-ep100-{:.3f}-ep200-{:.3f}".format(
-            info['valid_err_m_mean'][LIM1], info['valid_err_m_mean'][LIM2],
+        valid_m_info = "model-ep{}-{:.3f}-ep{}-{:.3f}".format(
+            LIM1+1, info['valid_err_m_mean'][LIM1], EPOCHS, info['valid_err_m_mean'][LIM2],
         )
 
         # Test, single and model.
-        test_s_info = "single-ep100-{:.3f}-ep200-{:.3f}".format(
-            info['test_err_s_mean'][LIM1], info['test_err_s_mean'][LIM2],
+        test_s_info = "single-ep{}-{:.3f}-ep{}-{:.3f}".format(
+            LIM1+1, info['test_err_s_mean'][LIM1], EPOCHS, info['test_err_s_mean'][LIM2],
         )
-        test_m_info = "model-ep100-{:.3f}-ep200-{:.3f}".format(
-            info['test_err_m_mean'][LIM1], info['test_err_m_mean'][LIM2],
+        test_m_info = "model-ep{}-{:.3f}-ep{}-{:.3f}".format(
+            LIM1+1, info['test_err_m_mean'][LIM1], EPOCHS, info['test_err_m_mean'][LIM2],
         )
 
         # Add validation to plot, column 0.
@@ -197,8 +194,10 @@ def plot_one_type(headname, figname):
         r6 = get_rank(ranks['row_to_m_100_t'], row)
         r7 = get_rank(ranks['row_to_s_200_t'], row)
         r8 = get_rank(ranks['row_to_m_200_t'], row)
-        title1 = 's100-m100-s200-m200r-{}-{}-{}-{}'.format(r1,r2,r3,r4)
-        title2 = 's100-m100-s200-m200r-{}-{}-{}-{}'.format(r5,r6,r7,r8)
+        title1 = 's{}-m{}-s{}-m{}-rank-{}-{}-{}-{}'.format(LIM1+1, LIM1+1,
+                LIM2+1, LIM2+1, r1, r2, r3, r4)
+        title2 = 's{}-m{}-s{}-m{}-rank-{}-{}-{}-{}'.format(LIM1+1, LIM1+1,
+                LIM2+1, LIM2+1, r5, r6, r7, r8)
         ax[row,0].set_title('Valid-'+title1, fontsize=title_size)
         ax[row,1].set_title('Test-'+title2,  fontsize=title_size)
 
@@ -214,11 +213,25 @@ def plot_one_type(headname, figname):
                 ax[row,col].set_ylabel("Valid Error % (5k digits)", fontsize=ysize)
             elif col == 1:
                 ax[row,col].set_ylabel("Test Error % (10k digits)", fontsize=ysize)
-            ax[row,col].axvline(x=LIM1, ls='--', color='darkblue')
-            ax[row,col].axvline(x=LIM2, ls='--', color='darkblue')
+            # Vertical lines for the LIM1, LIM2, as well as burn-in epochs.
+            ax[row,col].axvline(x=LIM1, ls='--', color='blue')
+            ax[row,col].axvline(x=LIM2, ls='--', color='blue')
+            ax[row,col].axvline(x=BURN_IN, ls='--', color='red')
     plt.tight_layout()
     plt.savefig(figname)
 
 
 if __name__ == "__main__":
-    plot_one_type('logs/sgd-tune/', "figures/tune_sgd_coarse.png")
+    # ADJUST for SGD
+    hparams = {
+        'lrate': ['0.04', '0.07', '0.1', '0.3', '0.5', '0.7'],
+        'wd':    ['0.0', '0.000001', '0.00001', '0.0001', '0.001'],
+    }
+    plot_one_type('logs/sgd-tune/', "figures/tune_sgd_coarse.png", hparams)
+
+    # ADJUST for RMSPROP
+    hparams = {
+        'lrate': ['0.01', '0.005', '0.001', '0.0005', '0.0001'],
+        'wd':    ['0.0', '0.000001', '0.00001', '0.0001'],
+    }
+    plot_one_type('logs/rmsprop-tune/', "figures/tune_rmsprop_coarse.png", hparams)
