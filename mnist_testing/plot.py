@@ -26,8 +26,8 @@ lw, ms = 3, 8
 
 # ADJUST
 HPARAMS = {
-    'lrate': [0.01, 0.05, 0.1, 0.3, 0.5],
-    'wd':    [0.0, 0.000001, 0.00001, 0.0001, 0.001],
+    'lrate': ['0.01', '0.05', '0.1', '0.3', '0.5'],
+    'wd':    ['0.0', '0.000001', '0.00001', '0.0001', '0.001'],
 }
 
 
@@ -49,8 +49,8 @@ def parse(file_head, headname, dirs):
         while True:
             if 'epoch | l2_loss (v)' in all_lines[idx]:
                 all_lines = all_lines[idx+1:]
-                print("found info for {}, at line {}, w/{} data points".format(
-                        ff, idx, len(all_lines)))
+                #print("found info for {}, at line {}, w/{} data points".format(
+                #        ff, idx, len(all_lines)))
                 break
             idx += 1
             if idx > 50:
@@ -80,51 +80,127 @@ def parse(file_head, headname, dirs):
     return info
 
 
-def plot_one_type_5x5(headname, lrates, figname):
+def get_row_index(head):
+    num_lr = len(HPARAMS['lrate'])
+    num_wd = len(HPARAMS['wd'])
+    for idx,lr in enumerate(HPARAMS['lrate']):
+        if 'lrate-{}-'.format(lr) in head:
+            lr_idx = idx
+    for idx,wd in enumerate(HPARAMS['wd']):
+        if 'wd-{}-'.format(wd) in head:
+            wd_idx = idx
+    row_idx = lr_idx + num_lr*wd_idx
+    return row_idx
+
+
+def get_rank(row_tuples, row):
+    for idx,element in enumerate(row_tuples):
+        if row == element[0]:
+            return idx
+    print("something bad happened")
+    sys.exit()
+
+
+def axarr_plot(axarr, row, col, xcoords, mean, std, name):
+    axarr[row,col].plot(xcoords, mean, lw=lw, label=name)
+    axarr[row,col].fill_between(xcoords, mean-std, mean+std,
+            alpha=error_region_alpha)
+
+
+def plot_one_type(headname, figname):
     """
-    First column, validation, second test.  Assumes we did 5x5 evaluation of
-    learning rates and weight decays. We'll have 5x5 columns, so it will be a
-    lot of information to process. We'll have to form a ranking.
+    First column, validation, second test. There is a lot of information to
+    process. We'll have to form a ranking and add to the plot titles.
     """
     dirs = sorted([e for e in os.listdir(headname) if 'seed' in e])
     unique_dirs = sorted( list( set([x[:-1].replace('seed-','') for x in dirs]) ) )
     print("\nPlotting one figure with {} files".format(len(dirs)))
     print("and {} unique stems".format(len(unique_dirs)))
-    nrows, ncols = len(lrates), 2
-    fig,ax = plt.subplots(nrows, ncols, figsize=(5*nrows,20*ncols))
+    nrows = len(HPARAMS['lrate']) * len(HPARAMS['wd'])
+    ncols = 2
+    fig,ax = plt.subplots(nrows, ncols, figsize=(10*ncols,10*nrows))
 
-    def axarr_plot(axarr, row, col, xcoords, mean, std, name):
-        axarr[row,col].plot(xcoords, mean, lw=lw, label=name)
-        axarr[row,col].fill_between(xcoords, mean-std, mean+std,
-                alpha=error_region_alpha)
-
-    int1,int2 = 50,100
+    # Let's first get *validation rankings* for these (shouldn't be using test).
+    LIM1 = 100-1
+    LIM2 = 200-1
+    ranks = defaultdict(list)
 
     for head in unique_dirs:
-        print("\nCurrently on head {}".format(head))
         info = parse(head, headname, dirs)
-        row = 0
-        for lr in lrates:
-            if 'lrate-{}-'.format(lr) in head:
-                row = lrates[lr]
-        print("for {} row is {}".format(head, row))
+        row = get_row_index(head)
+        print("Currently on head {} w/row idx {}".format(head, row))
 
-        # Only do the 100th point and the avg from 50 to 100 due to prior work
-        valid_info = "one-{:.3f}-avg-{:.3f}".format(
-                info['valid_err_s_mean'][int2-1],
-                np.mean(info['valid_err_s_mean'][int1:int2]))
-        test_info  = "one-{:.3f}-avg-{:.3f}".format(
-                info['test_err_s_mean'][int2-1],
-                np.mean(info['test_err_s_mean'][int1:int2]))
+        # Validation, 100.
+        ranks['row_to_s_100'].append(   (row, info['valid_err_s_mean'][LIM1-1]) )
+        ranks['row_to_m_100'].append(   (row, info['valid_err_m_mean'][LIM1-1]) )
+        # Validation, 200.
+        ranks['row_to_s_200'].append(   (row, info['valid_err_s_mean'][LIM2-1]) )
+        ranks['row_to_m_200'].append(   (row, info['valid_err_m_mean'][LIM2-1]) )
+        # Test, 100.
+        ranks['row_to_s_100_t'].append( (row, info['test_err_s_mean'][LIM1-1]) )
+        ranks['row_to_m_100_t'].append( (row, info['test_err_m_mean'][LIM1-1]) )
+        # Test, 200.
+        ranks['row_to_s_200_t'].append( (row, info['test_err_s_mean'][LIM2-1]) )
+        ranks['row_to_m_200_t'].append( (row, info['test_err_m_mean'][LIM2-1]) )
 
+    # Order the rankings.
+    for key in ranks:
+        ranks[key] = sorted(ranks[key], key=lambda x: x[1])
+
+    # Now loop again to plot, this time using the rankings we've stored.
+    for head in unique_dirs:
+        info = parse(head, headname, dirs)
+        row = get_row_index(head)
+
+        # Validation, single and model.
+        valid_s_info = "single-ep100-{:.3f}-ep200-{:.3f}".format(
+            info['valid_err_s_mean'][LIM1], info['valid_err_s_mean'][LIM2],
+        )
+        valid_m_info = "model-ep100-{:.3f}-ep200-{:.3f}".format(
+            info['valid_err_m_mean'][LIM1], info['valid_err_m_mean'][LIM2],
+        )
+
+        # Test, single and model.
+        test_s_info = "single-ep100-{:.3f}-ep200-{:.3f}".format(
+            info['test_err_s_mean'][LIM1], info['test_err_s_mean'][LIM2],
+        )
+        test_m_info = "model-ep100-{:.3f}-ep200-{:.3f}".format(
+            info['test_err_m_mean'][LIM1], info['test_err_m_mean'][LIM2],
+        )
+
+        # Add validation to plot, column 0.
         axarr_plot(ax, row, 0, info['x'],
                    info['valid_err_s_mean'],
                    info['valid_err_s_std'],
-                   name=head+valid_info)
+                   name=head+valid_s_info)
+        axarr_plot(ax, row, 0, info['x'],
+                   info['valid_err_m_mean'],
+                   info['valid_err_m_std'],
+                   name=head+valid_m_info)
+
+        # Add test to plot, colum 1.
         axarr_plot(ax, row, 1, info['x'],
                    info['test_err_s_mean'],
                    info['test_err_s_std'],
-                   name=head+test_info)
+                   name=head+test_s_info)
+        axarr_plot(ax, row, 1, info['x'],
+                   info['test_err_m_mean'],
+                   info['test_err_m_std'],
+                   name=head+test_m_info)
+
+        # Titles
+        r1 = get_rank(ranks['row_to_s_100'], row)
+        r2 = get_rank(ranks['row_to_m_100'], row)
+        r3 = get_rank(ranks['row_to_s_200'], row)
+        r4 = get_rank(ranks['row_to_m_200'], row)
+        r5 = get_rank(ranks['row_to_s_100_t'], row)
+        r6 = get_rank(ranks['row_to_m_100_t'], row)
+        r7 = get_rank(ranks['row_to_s_200_t'], row)
+        r8 = get_rank(ranks['row_to_m_200_t'], row)
+        title1 = 's100-m100-s200-m200r-{}-{}-{}-{}'.format(r1,r2,r3,r4)
+        title2 = 's100-m100-s200-m200r-{}-{}-{}-{}'.format(r5,r6,r7,r8)
+        ax[row,0].set_title('Valid-'+title1, fontsize=title_size)
+        ax[row,1].set_title('Test-'+title2,  fontsize=title_size)
 
     # Bells and whistles
     for row in range(nrows):
@@ -136,16 +212,13 @@ def plot_one_type_5x5(headname, lrates, figname):
             ax[row,col].set_xlabel("Epochs (55k digits each)", fontsize=xsize)
             if col == 0:
                 ax[row,col].set_ylabel("Valid Error % (5k digits)", fontsize=ysize)
-                ax[row,col].set_title('Valid Error', fontsize=title_size)
             elif col == 1:
                 ax[row,col].set_ylabel("Test Error % (10k digits)", fontsize=ysize)
-                ax[row,col].set_title('Test Error', fontsize=title_size)
-            ax[row,col].axvline(x=int1, ls='--', color='darkblue')
-            ax[row,col].axvline(x=int2, ls='--', color='darkblue')
+            ax[row,col].axvline(x=LIM1, ls='--', color='darkblue')
+            ax[row,col].axvline(x=LIM2, ls='--', color='darkblue')
     plt.tight_layout()
     plt.savefig(figname)
 
 
 if __name__ == "__main__":
-    plot_one_type_5x5('logs/sgd-tune/',    "figures/tune_sgd_coarse.png")
-    plot_one_type_5x5('logs/momsgd-tune/', "figures/tune_momsgd_coarse.png")
+    plot_one_type('logs/sgd-tune/', "figures/tune_sgd_coarse.png")

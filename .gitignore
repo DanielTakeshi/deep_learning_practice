@@ -4,3 +4,4 @@
 *.tgz
 data
 mnist_testing/figures/
+mnist_testing/logs/
