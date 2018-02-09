@@ -222,9 +222,10 @@ def plot_one_type(headname, figname, hparams):
 
 
 if __name__ == "__main__":
-    # ADJUST for SGD
+    # ADJUST for SGD. Note: I didn't run the (0.9, 0.001) combo. I also ran with
+    # 0.04 lrates but not including since many subplots makes rendering hard.
     hparams = {
-        'lrate': ['0.04', '0.07', '0.1', '0.3', '0.5', '0.7'],
+        'lrate': ['0.07', '0.1', '0.3', '0.5', '0.7', '0.9'],
         'wd':    ['0.0', '0.000001', '0.00001', '0.0001', '0.001'],
     }
     plot_one_type('logs/sgd-tune/', "figures/tune_sgd_coarse.png", hparams)
