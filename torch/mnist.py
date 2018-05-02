@@ -1,4 +1,4 @@
-""" MNIST classification with PyTorch.
+""" MNIST classification with PyTorch, version 0.4.0.
 
 From: https://github.com/pytorch/examples/blob/master/mnist/main.py
 With additional comments by myself.
@@ -165,7 +165,7 @@ if __name__ == "__main__":
     if args.cuda:
         torch.cuda.manual_seed(args.seed)
 
-    # Hmm ... must offer some paralleism benefit to loaders?
+    # Hmm ... must offer some parallelism benefit to loaders?
     kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
 
     # Load the MNIST data if necessary. There's also CIFAR, etc.
