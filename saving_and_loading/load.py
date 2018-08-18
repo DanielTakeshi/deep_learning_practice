@@ -29,12 +29,8 @@ def load():
     (x_train, y_train),(x_test, y_test) = mnist.load_data()
     x_train = x_train / 255.0
     x_test = x_test / 255.0
-    print(x_train.shape, x_train.dtype)
-    print(y_train.shape, y_train.dtype)
-    print(x_test.shape, x_test.dtype)
-    print(y_test.shape, y_test.dtype)
 
-    for ep in range(0,10):
+    for ep in range(0,9):
         # It's a two-step process. For restoring, don't include the stuff
         # from the `data`, i.e. use `name`, not `name.data-00000-of-00001`.
         sess = tf.Session()
@@ -43,6 +39,7 @@ def load():
         if ep == 0:
             debug()
 
+        # How we extract individual tensors. Note the `:0`.
         graph = tf.get_default_graph()
         images_ph = graph.get_tensor_by_name("images:0")
         labels_ph = graph.get_tensor_by_name("labels:0")
@@ -64,12 +61,9 @@ def load():
             cum_loss += loss_test
         acc_test = cum_acc / float(k)
         loss_test = cum_loss / float(k)
-        print("{}, {:.3f}, {:.5f}".format(ep, acc_test, loss_test))
+
+        print("{}, {:.3f}, {:.5f}".format(ep+1, acc_test, loss_test))
 
 
 if __name__ == '__main__':
-    seed = 1
-    np.random.seed(seed)
-    random.seed(seed)
-    tf.set_random_seed(seed)
     load()
