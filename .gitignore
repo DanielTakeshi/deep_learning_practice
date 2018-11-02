@@ -2,7 +2,11 @@
 *.swp
 *.pyc
 *.tgz
+*.zip
+
 data
 mnist_testing/figures/
 mnist_testing/logs/
 saving_and_loading/checkpoints/
+
+pretrain/hymenoptera_data/
