@@ -1,4 +1,4 @@
-""" From 60 min blitz tutorial 
+""" From 60 min blitz tutorial. Now for PyTorch 0.4.1.
 
 Btw, note that Conv2d has args (from ipython command line):
 
@@ -12,6 +12,7 @@ import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
 torch.set_printoptions(linewidth=180) # :-)
+import sys
 
 
 class Net(nn.Module):
@@ -38,6 +39,7 @@ class Net(nn.Module):
 
 if __name__ == "__main__":
     # If we set net to this device, we need data on the device as well
+    # It will give a warning if `cuda:k` does not exist on the machine.
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print("our device: {}\n".format(device))
 
@@ -54,8 +56,8 @@ if __name__ == "__main__":
                                            download=True, transform=transform)
     testloader = torch.utils.data.DataLoader(testset, batch_size=4,
                                              shuffle=False, num_workers=2)
-    
-    classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+    classes = ('plane', 'car', 'bird', 'cat', 'deer',
+               'dog', 'frog', 'horse', 'ship', 'truck')
 
     net = Net()
     net.to(device)
@@ -64,18 +66,19 @@ if __name__ == "__main__":
     optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
 
     # loop over the dataset multiple times (use trainloader for convenience)
-    for epoch in range(2):  
-
+    for epoch in range(4):  
         running_loss = 0.0
-        for i, data in enumerate(trainloader, 0):
+
+        for i, data in enumerate(trainloader):
             # assuming we kept batch_size=4 obviously
             # inputs.size():  torch.Size([4, 3, 32, 32])
             # labels.size():  torch.Size([4])
             # outputs.size(): torch.Size([4, 10])
             inputs, labels = data
             inputs, labels = inputs.to(device), labels.to(device)
+
+            # zero grads, then forward + backward + optimize
             optimizer.zero_grad()
-            # forward + backward + optimize
             outputs = net(inputs)
             loss = criterion(outputs, labels)
             loss.backward()
@@ -100,10 +103,8 @@ if __name__ == "__main__":
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
     
-    print('Accuracy of the network on the 10000 test images: %d %%' % (
+    print('\nAccuracy of the network on the 10000 test images: %d %%\n' % (
         100 * correct / total))
-    print()
-
     # analyze per class performance
     class_correct = list(0. for i in range(10))
     class_total = list(0. for i in range(10))

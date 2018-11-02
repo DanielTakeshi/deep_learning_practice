@@ -1,7 +1,13 @@
-""" MNIST classification with PyTorch, version 0.4.0.
+""" MNIST classification with PyTorch, version 0.4.0. (Edit: now 0.4.1 ...)
 
 From: https://github.com/pytorch/examples/blob/master/mnist/main.py
 With additional comments by myself.
+
+Update Nov 2018, for GPU code, this seems to be the preferred way nowadays:
+
+    device = torch.device('cuda:0' if torch.cuda.is_avaliable() else 'cpu')
+
+and then replace `.cuda()` with `.to(device)`. I'll do that for future code.
 """
 import argparse
 import torch
@@ -43,6 +49,8 @@ class Net(nn.Module):
         Also, `x` must be of type `Variable`. So is the output. And BTW we
         always assume a minibatch of samples. In TF we had some flexibility (I
         think) but it's better to always leave an extra dimension for MBs.
+
+        Update: need to add `dim` argument for `log_softmax()`.
         """
         x = F.relu(F.max_pool2d(self.conv1(x), 2))
         x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
@@ -50,17 +58,16 @@ class Net(nn.Module):
         x = F.relu(self.fc1(x))
         x = F.dropout(x, training=self.training)
         x = self.fc2(x)
-        return F.log_softmax(x)
+        return F.log_softmax(x, dim=1)
 
 
 def train(epoch, train_loader, model, optimizer):
     """ Training.
 
-    Set `model.train()`, even though it's not necessary to get good performance
-    on this particular MNIST. It seems to be "good PyTorch practice" because it
+    Set `model.train()`. It seems to be "good PyTorch practice" because it
     makes our intent to train clearer. By default models are set to training
     mode. The mode matters for modules such as BatchNorm and Dropout which
-    behave differently during them.
+    behave differently during them. Actually, we have Dropout here!
 
     We repeatedly call from the train_loader which provides us batches. However,
     those are not on the CPU, hence why we keep transferring. It's also
@@ -106,7 +113,7 @@ def train(epoch, train_loader, model, optimizer):
         if batch_idx % args.log_interval == 0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
-                100. * batch_idx / len(train_loader), loss.data[0]))
+                100. * batch_idx / len(train_loader), loss.item()))
 
 
 def test(test_loader, model):
@@ -120,19 +127,21 @@ def test(test_loader, model):
     average but just summing it. We save averaging for the end.
 
     And note the use of `[...].data` to extract the contents of a Variable.
+    EDIT: use `item()`:
+        https://discuss.pytorch.org/t/confused-about-loss-data-0/1572
     """
     model.eval()
     test_loss = 0
     correct = 0
-
-    for data, target in test_loader:
-        if args.cuda:
-            data, target = data.cuda(), target.cuda()
-        data, target = Variable(data, volatile=True), Variable(target)
-        output = model(data)
-        test_loss += F.nll_loss(output, target, size_average=False).data[0] # sum up batch loss
-        pred = output.data.max(1, keepdim=True)[1] # get the index of the max log-probability
-        correct += pred.eq(target.data.view_as(pred)).cpu().sum()
+    with torch.no_grad():
+        for data, target in test_loader:
+            if args.cuda:
+                data, target = data.cuda(), target.cuda()
+            data, target = Variable(data), Variable(target)
+            output = model(data)
+            test_loss += F.nll_loss(output, target, size_average=False).item() # sum up batch loss
+            pred = output.data.max(1, keepdim=True)[1] # get the index of the max log-probability
+            correct += pred.eq(target.data.view_as(pred)).cpu().sum()
 
     test_loss /= len(test_loader.dataset)
     print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
@@ -146,7 +155,7 @@ if __name__ == "__main__":
                         help='input batch size for training (default: 64)')
     parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
                         help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=10, metavar='N',
+    parser.add_argument('--epochs', type=int, default=4, metavar='N',
                         help='number of epochs to train (default: 10)')
     parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
                         help='learning rate (default: 0.01)')
@@ -160,7 +169,6 @@ if __name__ == "__main__":
                         help='how many batches to wait before logging training status')
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
-
     torch.manual_seed(args.seed)
     if args.cuda:
         torch.cuda.manual_seed(args.seed)

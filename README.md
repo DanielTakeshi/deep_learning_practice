@@ -8,3 +8,5 @@ Well, originally it was for TensorFlow practice. Now I have practiced with:
 - PyTorch
 
 Mostly with Python3, but some projects really require Python2, bleh.
+
+For robotics projects, those usually involve Python 2.7. I am using Torch 0.4.1.
