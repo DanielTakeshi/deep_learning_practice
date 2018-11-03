@@ -109,10 +109,31 @@ def prepare_raw_data():
 def pytorch_data():
     """
     Straight from the tutorial ... but let's see what happens when I play around
-    with different transformations.
+    with different transformations.  I'm not sure how to deal with random
+    resizes and detection-based labels. But for classification, things should be
+    easier ... which is what I'm doing here with the transition network anyway.
 
-    I'm not sure how to deal with random resizes and detection-based labels. But
-    for classification, things should be easier ...
+    If the transforms which deal with sizes don't resize to (224), then this
+    is the error message:
+
+      Traceback (most recent call last):
+    File "bedmake.py", line 257, in <module>
+      model = train(info, resnet18)
+    File "bedmake.py", line 215, in train
+      outputs = model(inputs)             # forward pass
+    File "/home/seita/seita-venvs/py2-torch/local/lib/python2.7/site-packages/torch/nn/modules/module.py", line 477, in __call__
+      result = self.forward(*input, **kwargs)
+    File "/home/seita/seita-venvs/py2-torch/local/lib/python2.7/site-packages/torchvision/models/resnet.py", line 151, in forward
+      x = self.fc(x)
+    File "/home/seita/seita-venvs/py2-torch/local/lib/python2.7/site-packages/torch/nn/modules/module.py", line 477, in __call__
+      result = self.forward(*input, **kwargs)
+    File "/home/seita/seita-venvs/py2-torch/local/lib/python2.7/site-packages/torch/nn/modules/linear.py", line 55, in forward
+      return F.linear(input, self.weight, self.bias)
+    File "/home/seita/seita-venvs/py2-torch/local/lib/python2.7/site-packages/torch/nn/functional.py", line 1024, in linear
+      return torch.addmm(bias, input, weight.t())
+    RuntimeError: size mismatch, m1: [32 x 2048], m2: [512 x 2] at /pytorch/aten/src/THC/generic/THCTensorMathBlas.cu:249
+
+    Which, is good. I don't think we can get away with improperly-sized input!!
 
     `ToTensor()`: convert from `png` to Torch tensor.
     """
@@ -253,5 +274,5 @@ if __name__ == "__main__":
     info = pytorch_data()
 
     # Train the ResNet. Then I can do stuff with it ...  I get similar best
-    # validation set performance with ResNet-18 and ResNet-34, fyi.
+    # validation set performance with ResNet-{18,34,50}, fyi.
     model = train(info, resnet18)
