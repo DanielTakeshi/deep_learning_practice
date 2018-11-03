@@ -50,6 +50,11 @@ import sys
 
 plt.ion()   # interactive mode
 
+
+# Daniel: are we in ssh mode?
+ssh_mode = True
+
+
 ######################################################################
 # Load Data
 # ---------
@@ -73,6 +78,8 @@ plt.ion()   # interactive mode
 
 # Data augmentation and normalization for training
 # Just normalization for validation
+# And note: these normalization values, they pre-computed for us, per-channel.
+
 data_transforms = {
     'train': transforms.Compose([
         transforms.RandomResizedCrop(224),
@@ -88,6 +95,7 @@ data_transforms = {
     ]),
 }
 
+# image_datasets['train'] and image_datasets['val']
 data_dir = 'hymenoptera_data'
 image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x),
                                           data_transforms[x])
@@ -125,9 +133,8 @@ inputs, classes = next(iter(dataloaders['train']))
 # Make a grid from batch
 out = torchvision.utils.make_grid(inputs)
 
-# (Daniel: I did this by ssh)
-#imshow(out, title=[class_names[x] for x in classes])
-
+if not ssh_mode:
+    imshow(out, title=[class_names[x] for x in classes])
 
 ######################################################################
 # Training the model
@@ -282,8 +289,8 @@ model_ft = train_model(model_ft, criterion, optimizer_ft, exp_lr_scheduler,
 ######################################################################
 #
 
-# (Daniel: skipping if ssh)
-#visualize_model(model_ft)
+if not ssh_mode:
+    visualize_model(model_ft)
 
 
 ######################################################################
@@ -336,6 +343,7 @@ model_conv = train_model(model_conv, criterion, optimizer_conv,
 #
 
 # (Daniel: again)
-#visualize_model(model_conv)
-#plt.ioff()
-#plt.show()
+if not ssh_mode:
+    visualize_model(model_conv)
+    plt.ioff()
+    plt.show()
