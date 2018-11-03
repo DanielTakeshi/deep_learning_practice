@@ -18,9 +18,12 @@ into [0,1]? The code for ImageNet folks appear to have done that as values for
 the mean are within [0,1].
 """
 import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.optim import lr_scheduler
 import torchvision.models as models
 from torchvision import datasets, transforms
-import cv2, os, sys, pickle, time
+import copy, cv2, os, sys, pickle, time
 import numpy as np
 from os.path import join
 
@@ -42,8 +45,15 @@ def prepare_raw_data():
     In particular, for classification, it's easiest to put them in their own
     separate folders and then to use `ImageFolder`.
 
-    https://pytorch.org/tutorials/beginner/data_loading_tutorial.html
-    https://pytorch.org/tutorials/beginner/transfer_learning_tutorial.html
+    Tutorials:
+
+        https://pytorch.org/tutorials/beginner/data_loading_tutorial.html
+        https://pytorch.org/tutorials/beginner/transfer_learning_tutorial.html
+
+    Docs and support forums:
+
+        https://pytorch.org/docs/stable/torchvision/datasets.html?highlight=imagefolder#torchvision.datasets.ImageFolder
+        https://discuss.pytorch.org/t/questions-about-imagefolder/774
 
     If you need to call this again, delete the TARGET directory.
     """
@@ -100,6 +110,11 @@ def pytorch_data():
     """
     Straight from the tutorial ... but let's see what happens when I play around
     with different transformations.
+
+    I'm not sure how to deal with random resizes and detection-based labels. But
+    for classification, things should be easier ...
+
+    `ToTensor()`: convert from `png` to Torch tensor.
     """
     mean = [96.8104350432]
     std  = [84.6227108358]
@@ -119,13 +134,14 @@ def pytorch_data():
         ]),
     }
     
+    # So, ImageFolder (within the `train/` and `valid/`) requires images to be
+    # stored within sub-directories based on their labels. Also, I wonder, maybe
+    # better to drop the last batch for the DataLoader?
     image_datasets = {x: datasets.ImageFolder(join(TARGET,x), data_transforms[x]) 
                         for x in ['train', 'valid']}
     dataloaders    = {x: torch.utils.data.DataLoader(image_datasets[x],
-                                                     batch_size=32,
-                                                     shuffle=True,
-                                                     num_workers=4)
-                        for x in ['train', 'valid']}
+                        batch_size=32, shuffle=True, num_workers=4)
+                          for x in ['train', 'valid']}
     dataset_sizes  = {x: len(image_datasets[x]) for x in ['train', 'valid']}
     class_names    = image_datasets['train'].classes
     info = {'data_transforms' : data_transforms,
@@ -142,11 +158,90 @@ def train(info, model):
     dataloaders     = info['dataloaders']
     dataset_sizes   = info['dataset_sizes']
     class_names     = info['class_names']
+
+    # ADJUST CUDA DEVICE! Be careful about multi-GPU machines.
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print("\nNow training!! On device: {}".format(device))
     print("class_names: {}".format(class_names))
-    print("dataset_sizes: {}".format(dataset_sizes))
+    print("dataset_sizes: {}\n".format(dataset_sizes))
 
+    # Get things setup. Since ResNet has 1000 outputs, we need to adjust the
+    # last layer to only give two outputs (since I'm doing classification).
+    # And as usual, don't forget to add it to your correct device!!
+    num_penultimate_layer = model.fc.in_features
+    model.fc = nn.Linear(num_penultimate_layer, 2)
+    model = model.to(device)
+
+    # Loss function & optimizer; decay LR by factor of 0.1 every 7 epochs
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+    scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
+
+    # --------------------------------------------------------------------------
+    # FINALLY TRAINING!!
+    # --------------------------------------------------------------------------
+    since = time.time()
+    best_model_wts = copy.deepcopy(model.state_dict())
+    best_acc = 0.0
+    num_epochs = 20
+
+    for epoch in range(num_epochs):
+        print('\nEpoch {}/{}'.format(epoch, num_epochs-1))
+        print('-' * 20)
+
+        # Each epoch has a training and validation phase
+        # Epochs automatically tracked via the for loop over `dataloaders`.
+        for phase in ['train', 'valid']:
+            if phase == 'train':
+                scheduler.step()
+                model.train()  # Set model to training mode
+            else:
+                model.eval()   # Set model to evaluate mode
+
+            running_loss = 0.0
+            running_corrects = 0
+
+            # Iterate over data and labels (minibatches), by default, for one
+            # epoch. Data augmentation happens here on the fly. :-)
+            for inputs, labels in dataloaders[phase]:
+                inputs = inputs.to(device)
+                labels = labels.to(device)
+
+                # zero the parameter gradients
+                optimizer.zero_grad()
+
+                # forward: track (gradient?) history _only_ if training
+                with torch.set_grad_enabled(phase == 'train'):
+                    outputs = model(inputs)             # forward pass
+                    _, preds = torch.max(outputs, 1)    # returns (max vals, indices)
+                    loss = criterion(outputs, labels)
+
+                    # backward + optimize only if in training phase
+                    if phase == 'train':
+                        loss.backward()
+                        optimizer.step()
+
+                running_loss += loss.item() * inputs.size(0)
+                running_corrects += torch.sum(preds == labels.data)
+
+            # We summed (not averaged) the losses earlier, so divide by full size.
+            epoch_loss = running_loss / dataset_sizes[phase]
+            epoch_acc = running_corrects.double() / dataset_sizes[phase]
+            print('({})  Loss: {:.4f}, Acc: {:.4f} (num: {})'.format(
+                    phase, epoch_loss, epoch_acc, running_corrects))
+
+            # deep copy the model, use `state_dict()`.
+            if phase == 'valid' and epoch_acc > best_acc:
+                best_acc = epoch_acc
+                best_model_wts = copy.deepcopy(model.state_dict())
+
+    time_elapsed = time.time() - since
+    print('\nTrained in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
+    print('Best val Acc: {:4f}'.format(best_acc))
+
+    # load best model weights
+    model.load_state_dict(best_model_wts)
+    return model
 
 
 if __name__ == "__main__":
@@ -157,5 +252,6 @@ if __name__ == "__main__":
     # Prepare the ImageLoader.
     info = pytorch_data()
 
-    # Train the ResNet.
-    train(info, resnet18)
+    # Train the ResNet. Then I can do stuff with it ...  I get similar best
+    # validation set performance with ResNet-18 and ResNet-34, fyi.
+    model = train(info, resnet18)
