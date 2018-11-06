@@ -29,14 +29,96 @@ from os.path import join
 
 # Target is where we re-format the data for PyTorch convenience methods.
 # In the `cache` files, I already processed the depth images.
-HEAD = '/nfs/diskstation/seita/bed-make/cache_combo_v01_success'
+HEAD   = '/nfs/diskstation/seita/bed-make/cache_combo_v03_success'
 TARGET = '/nfs/diskstation/seita/bed-make/cache_combo_v03_success_pytorch'
+
+# Really weird, this doesn't work? Our data is supposed to be 3 channels, even
+# if we actually triplicated them ?? I just get 50% accuracy (random guessing).
+# EDIT: wait, now it's actually doing something, ha ha I'm confused.
+# But it takes way too many epochs ... adjust optimizer?
+MEAN = [96.8104350432, 96.8104350432, 96.8104350432]
+STD  = [84.6227108358, 84.6227108358, 84.6227108358]
+
+# At least this works, but I am still confused.
+#MEAN = [96.8104350432]
+#STD  = [84.6227108358]
 
 # Torch stuff
 resnet18 = models.resnet18(pretrained=True)
 resnet34 = models.resnet34(pretrained=True)
 resnet50 = models.resnet50(pretrained=True)
 # ------------------------------------------------------------------------------
+
+
+def _save_images(inputs, labels, phase):
+    """Debugging the data transformations, labels, etc.
+
+    OpenCV can't save if you use floats. You need: `img = img.astype(int)`.
+    But, we also need the axes channel to be last, i.e. (height,width,channel).
+    But PyTorch puts the channels earlier ... (channel,height,width).
+    Note: the depth images in the pickle files are (480,640,3).
+
+    Given `img` from a PyTorch Tensor, it may be of shape (3,224,224). For this,
+    DON'T use `img = img.swapaxes(0,2)` as that will not correctly change the
+    axes; it rotates the image. Here's why, documentation says:
+
+        Converts a torch.*Tensor of shape C x H x W or a numpy ndarray of shape
+        H x W x C to a PIL Image while preserving the value range.
+
+    https://pytorch.org/docs/stable/torchvision/transforms.html#torchvision.transforms.ToPILImage
+    
+    Thus, you need `img = img.transpose((1,2,0))`. Then channel goes at the end
+    BUT the height and width are also both 'translated' over to the first (i.e.,
+    0-th index) and second channels, respectively.
+    """
+    import torchvision.transforms.functional as F
+    B = inputs.shape[0]
+
+    # Extract numpy tensor.
+    inputs = inputs.cpu().numpy()
+    img1 = inputs[0,:,:,:]
+
+    # Get types and channel ordering correct, BEFORE undoing normalization!!
+    img1 = img1.transpose((1,2,0))
+    img1 = img1*STD + MEAN
+    img1 = img1.astype('uint8')
+
+    print("Our uint8 numpy image has shape {}".format(img1.shape))
+    print("")
+    print(np.sum(img1))
+    ##print(img1[:,:,0])
+    ##print(img1[:,:,0].shape)
+    ##print("")
+    ##print(img1[:,:,1])
+    ##print(img1[:,:,1].shape)
+    ##print("")
+    ##print(img1[:,:,2])
+    ##print(img1[:,:,2].shape)
+    ##print("")
+    ##print(np.sum(img1[:,:,1]-img1[:,:,2]))
+    ##print(np.sum(img1[:,:,0]))
+
+    # Save using cv2, and then PIL.
+    ## print(img1)
+    ## print(np.max(img1))
+
+    ## cv2.imwrite('test2.png', img1 )  # weird, not grayscale?
+    ## #img2 = F.to_pil_image(img1//np.max(img1))
+    ## #img2.save('test1.png')           # looks better, actually gray
+    ## sys.exit()
+    
+    for b in range(B):
+        img = inputs[b,:,:,:]
+        img = img.transpose((1,2,0))
+        img = img*STD + MEAN
+        img = img.astype(int)
+        label = labels[b]
+        if int(label) == 0:
+            label = 'success'
+        else:
+            label = 'failure'
+        fname = 'tmp/{}_{}_{}.png'.format(phase, str(b).zfill(4), label)
+        cv2.imwrite(fname, img)
 
 
 def prepare_raw_data():
@@ -95,6 +177,7 @@ def prepare_raw_data():
 
                 # Accumulate statistics for mean and std computation across our
                 # lone channel. We actually 'triplcated' depth so take one axis.
+                # But since the network sees 3-channels, use a length-3 array?
                 numbers.extend( item['d_img'][:,:,0].flatten() )
 
         print("so far: success {} vs failure {}".format(t_success, t_failure))
@@ -137,21 +220,18 @@ def pytorch_data():
 
     `ToTensor()`: convert from `png` to Torch tensor.
     """
-    mean = [96.8104350432]
-    std  = [84.6227108358]
-
     data_transforms = {
         'train': transforms.Compose([
             transforms.RandomResizedCrop(224),
-            transforms.RandomHorizontalFlip(),
+            #transforms.RandomHorizontalFlip(), # I'm confused, this means flip about _vertical_ axis?
             transforms.ToTensor(),
-            transforms.Normalize(mean, std)
+            transforms.Normalize(MEAN, STD)
         ]),
         'valid': transforms.Compose([
             transforms.Resize(256),
             transforms.CenterCrop(224),
             transforms.ToTensor(),
-            transforms.Normalize(mean, std)
+            transforms.Normalize(MEAN, STD)
         ]),
     }
     
@@ -180,7 +260,7 @@ def train(info, model):
     dataset_sizes   = info['dataset_sizes']
     class_names     = info['class_names']
 
-    # ADJUST CUDA DEVICE! Be careful about multi-GPU machines.
+    # ADJUST CUDA DEVICE! Be careful about multi-GPU machines like the Tritons!!
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print("\nNow training!! On device: {}".format(device))
     print("class_names: {}".format(class_names))
@@ -195,7 +275,7 @@ def train(info, model):
 
     # Loss function & optimizer; decay LR by factor of 0.1 every 7 epochs
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
     scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
     # --------------------------------------------------------------------------
@@ -227,6 +307,8 @@ def train(info, model):
             for inputs, labels in dataloaders[phase]:
                 inputs = inputs.to(device)
                 labels = labels.to(device)
+                _save_images(inputs, labels, phase)
+                sys.exit()
 
                 # zero the parameter gradients
                 optimizer.zero_grad()
