@@ -13,3 +13,5 @@ pretrain/hymenoptera_data/
 support_request/debug_img/
 support_request/tmp/
 support_request/*.pkl
+
+bedmake_transition/cache_combo_v03_success_pytorch/
