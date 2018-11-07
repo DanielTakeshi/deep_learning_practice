@@ -16,14 +16,18 @@ import torch.optim as optim
 from torch.optim import lr_scheduler
 import torchvision.models as models
 from torchvision import datasets, transforms
-import copy, cv2, os, sys, pickle, time
+import argparse, copy, cv2, os, sys, pickle, time
 import numpy as np
 from os.path import join
 
 # Target is where we re-format the data for PyTorch convenience methods.
 # In the `cache` files, I already processed the depth images.
 HEAD   = '/nfs/diskstation/seita/bed-make/cache_combo_v03_success'
-TARGET = '/nfs/diskstation/seita/bed-make/cache_combo_v03_success_pytorch'
+
+# Move locally after data creation! With 10 epochs, I get an 8x speed-up: 4min -> 30sec.
+#TARGET = '/nfs/diskstation/seita/bed-make/cache_combo_v03_success_pytorch'
+TARGET = 'cache_combo_v03_success_pytorch'
+
 TMPDIR = 'tmp/'
 
 # From `prepare_raw_data`. Remember, we really have three channels.
@@ -169,7 +173,7 @@ def _save_images(inputs, labels, phase):
         cv2.imwrite(fname, img)
 
 
-def train(model):
+def train(model, args):
     data_transforms = {
         'train': transforms.Compose([
             transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
@@ -211,8 +215,11 @@ def train(model):
 
     # Loss function & optimizer; decay LR by factor of 0.1 every 7 epochs
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
-    scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
+    if args.optim == 'sgd':
+        optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+        scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
+    else:
+        raise ValueError(args.optim)
 
     # --------------------------------------------------------------------------
     # FINALLY TRAINING!!
@@ -220,10 +227,9 @@ def train(model):
     since = time.time()
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
-    num_epochs = 20
 
-    for epoch in range(num_epochs):
-        print('\nEpoch {}/{}'.format(epoch, num_epochs-1))
+    for epoch in range(args.num_epochs):
+        print('\nEpoch {}/{}'.format(epoch, args.num_epochs-1))
         print('-' * 20)
 
         # Each epoch has a training and validation phase
@@ -243,8 +249,8 @@ def train(model):
             for inputs, labels in dataloaders[phase]:
                 inputs = inputs.to(device)
                 labels = labels.to(device)
-                _save_images(inputs, labels, phase)
-                sys.exit()
+                #_save_images(inputs, labels, phase)
+                #sys.exit()
 
                 # zero the parameter gradients
                 optimizer.zero_grad()
@@ -288,8 +294,19 @@ if __name__ == "__main__":
     # the data in the format we need for `ImageLoader`.
     #prepare_raw_data()
 
+    pp = argparse.ArgumentParser()
+    pp.add_argument('--optim', type=str)
+    pp.add_argument('--model', type=str)
+    pp.add_argument('--num_epochs', type=int, default=20)
+    args = pp.parse_args() 
+
     # Train the ResNet. Then I can do stuff with it ...  I get similar best
     # validation set performance with ResNet-{18,34,50}, fyi.
-    model = train(resnet18)
-
-    # Do stuff with the model?
+    if args.model == 'resnet18':
+        model = train(resnet18, args)
+    elif args.model == 'resnet34':
+        model = train(resnet34, args)
+    elif args.model == 'resnet50':
+        model = train(resnet50, args)
+    else:
+        raise ValueError(args.model)
