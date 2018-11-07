@@ -213,13 +213,14 @@ def train(model, args):
     model.fc = nn.Linear(num_penultimate_layer, 2)
     model = model.to(device)
 
-    # Loss function & optimizer; optionally decay LR by factor of 0.1 every 7 epochs
+    # Loss function & optimizer
     criterion = nn.CrossEntropyLoss()
     if args.optim == 'sgd':
         optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+        # not doing now, but could decay LR by factor of 0.1 every 7 epochs
         #scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
     elif args.optim == 'adam':
-        optimizer = optim.Adam(model.parameters(), lr=0.001)
+        optimizer = optim.Adam(model.parameters(), lr=0.0001)
     else:
         raise ValueError(args.optim)
 
@@ -229,6 +230,8 @@ def train(model, args):
     since = time.time()
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
+    all_train = []
+    all_valid = []
 
     for epoch in range(args.num_epochs):
         print('\nEpoch {}/{}'.format(epoch, args.num_epochs-1))
@@ -276,6 +279,10 @@ def train(model, args):
             epoch_acc = running_corrects.double() / dataset_sizes[phase]
             print('({})  Loss: {:.4f}, Acc: {:.4f} (num: {})'.format(
                     phase, epoch_loss, epoch_acc, running_corrects))
+            if phase == 'train':
+                all_train.append(round(epoch_acc.item(),3))
+            else:
+                all_valid.append(round(epoch_acc.item(),3))
 
             # deep copy the model, use `state_dict()`.
             if phase == 'valid' and epoch_acc > best_acc:
@@ -285,6 +292,8 @@ def train(model, args):
     time_elapsed = time.time() - since
     print('\nTrained in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
     print('Best val Acc: {:4f}'.format(best_acc))
+    print('train:  {}'.format(all_train))
+    print('valid:  {}'.format(all_valid))
 
     # load best model weights
     model.load_state_dict(best_model_wts)
