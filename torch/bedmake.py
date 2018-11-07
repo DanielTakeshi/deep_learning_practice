@@ -1,8 +1,14 @@
 """Let's see if I can train using the bed-making data I have.
+After running `prepare_raw_data()` only, I get:
 
-After running `prepare_raw_data` only, I get:
-
-
+    done loading data, success 559 vs failure 582 (total 1141)
+    len(numbers):  350515200  (has the single-channel mean/std info)
+    mean(numbers): 93.709165437
+    std(numbers):  85.0125809655
+    
+    But, use this for actual mean/std because we want them in [0,256) ...
+    mean(scaled): 0.366051427488
+    std(scaled):  0.332080394397
 """
 import torch
 import torch.nn as nn
@@ -18,10 +24,11 @@ from os.path import join
 # In the `cache` files, I already processed the depth images.
 HEAD   = '/nfs/diskstation/seita/bed-make/cache_combo_v03_success'
 TARGET = '/nfs/diskstation/seita/bed-make/cache_combo_v03_success_pytorch'
+TMPDIR = 'tmp/'
 
 # From `prepare_raw_data`. Remember, we really have three channels.
-MEAN = [96.8104350432, 96.8104350432, 96.8104350432]
-STD  = [84.6227108358, 84.6227108358, 84.6227108358]
+MEAN = [0.36605, 0.36605, 0.36605]
+STD  = [0.33208, 0.33208, 0.33208]
 
 # Pre-trained models
 resnet18 = models.resnet18(pretrained=True)
@@ -39,6 +46,7 @@ def prepare_raw_data():
     https://discuss.pytorch.org/t/questions-about-imagefolder/774
 
     If you need to call this again, delete the TARGET directory.
+    It will randomly assign 20% of the data to the validation set.
     """
     assert not os.path.exists(TARGET), "target directory exists:\n\t{}".format(TARGET)
     os.makedirs(TARGET)
@@ -62,40 +70,110 @@ def prepare_raw_data():
     for p_idx,p_ff in enumerate(pickle_files):
         with open(p_ff, 'r') as fh:
             data = pickle.load(fh)
-            print("Just loaded: {} (len: {})".format(p_ff, len(data)))
+            N = len(data)
+            print("Just loaded: {}  (len: {})".format(p_ff, N))
 
-            for item in data:
-                pname = path_train if p_idx != total_pickles-1 else path_valid
+            # Pick validation indices.
+            indx_random = np.random.permutation(N)
+            indx_train  = indx_random[ : int(N*0.8)]
+            indx_valid  = indx_random[int(N*0.8) : ]
+
+            # Each `item` here has a 'd_img' key, and a class label 'class' key.
+            for idx,item in enumerate(data):
+                if idx in indx_train:
+                    pname = path_train
+                else:
+                    pname = path_valid
+
                 if item['class'] == 0:
-                    png_name = join(pname, 'success', 'd_{}.png'.format(str(t_success).zfill(5)))
+                    png_name = join(pname, 'success', 
+                            'd_{}_{}.png'.format(str(p_idx).zfill(2), str(idx).zfill(4)))
                     t_success += 1
                 elif item['class'] == 1:
-                    png_name = join(pname, 'failure', 'd_{}.png'.format(str(t_failure).zfill(5)))
+                    png_name = join(pname, 'failure',
+                            'd_{}_{}.png'.format(str(p_idx).zfill(2), str(idx).zfill(4)))
                     t_failure += 1
                 else:
                     raise ValueError(item['class'])
-                cv2.imwrite(png_name, item['d_img'])
 
                 # Accumulate statistics for mean and std computation across our
-                # lone channel. We actually 'triplcated' depth so take one axis.
-                # But since the network sees 3-channels, use a length-3 array?
-                numbers.extend( item['d_img'][:,:,0].flatten() )
-
-        print("so far: success {} vs failure {}".format(t_success, t_failure))
+                # lone channel. We made values same across all three channels.
+                d_img = item['d_img']
+                assert d_img.shape == (480,640,3)
+                assert np.sum(d_img[:,:,0]) == np.sum(d_img[:,:,1]) == np.sum(d_img[:,:,2])
+                numbers.extend( d_img[:,:,0].flatten() )
+                cv2.imwrite(png_name, d_img)
+        print("  so far, success {} vs failure {}".format(t_success, t_failure))
 
     print("done loading data, success {} vs failure {} (total {})".format(
             t_success, t_failure, t_success+t_failure))
+    numbers = np.array(numbers)
     print("len(numbers):  {}  (has the single-channel mean/std info)".format(len(numbers)))
     print("mean(numbers): {}".format(np.mean(numbers)))
     print("std(numbers):  {}".format(np.std(numbers)))
+    print("\nBut, use this for actual mean/std because we want them in [0,256) ...")
+    print("mean(scaled): {}".format(np.mean(numbers/256.0)))
+    print("std(scaled):  {}".format(np.std(numbers/256.0)))
 
+
+def _save_images(inputs, labels, phase):
+    """Debugging the data transformations, labels, etc.
+
+    OpenCV can't save if you use floats. You need: `img = img.astype(int)`.
+    But, we also need the axes channel to be last, i.e. (height,width,channel).
+    But PyTorch puts the channels earlier ... (channel,height,width).
+    The raw depth images in the pickle files were of shape (480,640,3).
+
+    Given `img` from a PyTorch Tensor, it will be of shape (3,224,224) with
+    ResNet pre-processing. For this, DON'T use `img = img.swapaxes(0,2)` as that
+    will not correctly change the axes; it rotates the image. The docs say:
+
+    https://pytorch.org/docs/stable/torchvision/transforms.html#torchvision.transforms.ToPILImage
+        Converts a torch.*Tensor of shape C x H x W or a numpy ndarray of shape
+        H x W x C to a PIL Image while preserving the value range.
+
+    Thus, we need `img = img.transpose((1,2,0))`. Then channel goes at the end
+    BUT the height and width are also both 'translated' over to the first (i.e.,
+    0-th index) and second channels, respectively.
+    """
+    assert not os.path.exists(TMPDIR), "directory exists:\n\t{}".format(TMPDIR)
+    os.makedirs(TMPDIR)
+
+    # Extract numpy tensor on the CPU.
+    inputs = inputs.cpu().numpy()
+    B = inputs.shape[0]
+
+    # Iterate through all (data-augmented) images in minibatch and save.
+    for b in range(B):
+        img = inputs[b,:,:,:]
+
+        # A good sanity check, all channels of _processed_ image have same sum.
+        # Alsom, transpose to get 3-channel at the _end_, so shape (224,224,3).
+        assert np.sum(img[0,:,:]) == np.sum(img[1,:,:]) == np.sum(img[2,:,:])
+        assert img.shape == (3,224,224)
+        img = img.transpose((1,2,0))
+
+        # Undo the normalization, multiply by 255, then turn to integers.
+        img = img*STD + MEAN
+        img = img*255.0
+        img = img.astype(int)
+
+        # 0 means it is 'success' (i.e., blanket covered), 1 is failure.
+        label = labels[b]
+        if int(label) == 0:
+            label = 'success'
+        else:
+            label = 'failure'
+
+        fname = '{}/{}_{}_{}.png'.format(TMPDIR, phase, str(b).zfill(4), label)
+        cv2.imwrite(fname, img)
 
 
 def train(model):
     data_transforms = {
         'train': transforms.Compose([
-            transforms.RandomResizedCrop(224),
-            #transforms.RandomHorizontalFlip(), # I'm confused, this means flip about _vertical_ axis?
+            transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
+            transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize(MEAN, STD)
         ]),
@@ -208,8 +286,10 @@ def train(model):
 if __name__ == "__main__":
     # We only need to call this ONCE, then we can comment out since it creates
     # the data in the format we need for `ImageLoader`.
-    prepare_raw_data()
+    #prepare_raw_data()
 
     # Train the ResNet. Then I can do stuff with it ...  I get similar best
     # validation set performance with ResNet-{18,34,50}, fyi.
-    #model = train(info, resnet18)
+    model = train(resnet18)
+
+    # Do stuff with the model?
