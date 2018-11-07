@@ -213,11 +213,13 @@ def train(model, args):
     model.fc = nn.Linear(num_penultimate_layer, 2)
     model = model.to(device)
 
-    # Loss function & optimizer; decay LR by factor of 0.1 every 7 epochs
+    # Loss function & optimizer; optionally decay LR by factor of 0.1 every 7 epochs
     criterion = nn.CrossEntropyLoss()
     if args.optim == 'sgd':
         optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
-        scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
+        #scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
+    elif args.optim == 'adam':
+        optimizer = optim.Adam(model.parameters(), lr=0.001)
     else:
         raise ValueError(args.optim)
 
@@ -236,7 +238,7 @@ def train(model, args):
         # Epochs automatically tracked via the for loop over `dataloaders`.
         for phase in ['train', 'valid']:
             if phase == 'train':
-                scheduler.step()
+                #scheduler.step() # not doing this for now
                 model.train()  # Set model to training mode
             else:
                 model.eval()   # Set model to evaluate mode
