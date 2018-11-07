@@ -10,3 +10,6 @@ mnist_testing/logs/
 saving_and_loading/checkpoints/
 
 pretrain/hymenoptera_data/
+support_request/debug_img/
+support_request/tmp/
+support_request/*.pkl
