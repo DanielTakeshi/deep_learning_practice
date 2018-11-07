@@ -1,21 +1,8 @@
 """Let's see if I can train using the bed-making data I have.
 
-After running `prepare_raw_data`, I get:
+After running `prepare_raw_data` only, I get:
 
-Just loaded: /nfs/diskstation/seita/bed-make/cache_combo_v01_success/success_list_of_dicts_nodaug_cv_0_len_66.pkl (len: 66)
-so far: success 32 vs failure 34
-...
-Just loaded: /nfs/diskstation/seita/bed-make/cache_combo_v01_success/success_list_of_dicts_nodaug_cv_9_len_65.pkl (len: 65)
-so far: success 327 vs failure 327
-done loading data, success 327 vs failure 327 (total 654)
-len(numbers):  200908800  (has the single-channel mean/std info)
-mean(numbers): 96.8104350432
-std(numbers):  84.6227108358
 
-I think this makes sense. The depth values were in [0,255] and there's high
-standard deviation due to white vs black. But, maybe we should try and scale
-into [0,1]? The code for ImageNet folks appear to have done that as values for
-the mean are within [0,1].
 """
 import torch
 import torch.nn as nn
@@ -32,110 +19,24 @@ from os.path import join
 HEAD   = '/nfs/diskstation/seita/bed-make/cache_combo_v03_success'
 TARGET = '/nfs/diskstation/seita/bed-make/cache_combo_v03_success_pytorch'
 
-# Really weird, this doesn't work? Our data is supposed to be 3 channels, even
-# if we actually triplicated them ?? I just get 50% accuracy (random guessing).
-# EDIT: wait, now it's actually doing something, ha ha I'm confused.
-# But it takes way too many epochs ... adjust optimizer?
+# From `prepare_raw_data`. Remember, we really have three channels.
 MEAN = [96.8104350432, 96.8104350432, 96.8104350432]
 STD  = [84.6227108358, 84.6227108358, 84.6227108358]
 
-# At least this works, but I am still confused.
-#MEAN = [96.8104350432]
-#STD  = [84.6227108358]
-
-# Torch stuff
+# Pre-trained models
 resnet18 = models.resnet18(pretrained=True)
 resnet34 = models.resnet34(pretrained=True)
 resnet50 = models.resnet50(pretrained=True)
 # ------------------------------------------------------------------------------
 
 
-def _save_images(inputs, labels, phase):
-    """Debugging the data transformations, labels, etc.
-
-    OpenCV can't save if you use floats. You need: `img = img.astype(int)`.
-    But, we also need the axes channel to be last, i.e. (height,width,channel).
-    But PyTorch puts the channels earlier ... (channel,height,width).
-    Note: the depth images in the pickle files are (480,640,3).
-
-    Given `img` from a PyTorch Tensor, it may be of shape (3,224,224). For this,
-    DON'T use `img = img.swapaxes(0,2)` as that will not correctly change the
-    axes; it rotates the image. Here's why, documentation says:
-
-        Converts a torch.*Tensor of shape C x H x W or a numpy ndarray of shape
-        H x W x C to a PIL Image while preserving the value range.
-
-    https://pytorch.org/docs/stable/torchvision/transforms.html#torchvision.transforms.ToPILImage
-    
-    Thus, you need `img = img.transpose((1,2,0))`. Then channel goes at the end
-    BUT the height and width are also both 'translated' over to the first (i.e.,
-    0-th index) and second channels, respectively.
-    """
-    import torchvision.transforms.functional as F
-    B = inputs.shape[0]
-
-    # Extract numpy tensor.
-    inputs = inputs.cpu().numpy()
-    img1 = inputs[0,:,:,:]
-
-    # Get types and channel ordering correct, BEFORE undoing normalization!!
-    img1 = img1.transpose((1,2,0))
-    img1 = img1*STD + MEAN
-    img1 = img1.astype('uint8')
-
-    print("Our uint8 numpy image has shape {}".format(img1.shape))
-    print("")
-    print(np.sum(img1))
-    ##print(img1[:,:,0])
-    ##print(img1[:,:,0].shape)
-    ##print("")
-    ##print(img1[:,:,1])
-    ##print(img1[:,:,1].shape)
-    ##print("")
-    ##print(img1[:,:,2])
-    ##print(img1[:,:,2].shape)
-    ##print("")
-    ##print(np.sum(img1[:,:,1]-img1[:,:,2]))
-    ##print(np.sum(img1[:,:,0]))
-
-    # Save using cv2, and then PIL.
-    ## print(img1)
-    ## print(np.max(img1))
-
-    ## cv2.imwrite('test2.png', img1 )  # weird, not grayscale?
-    ## #img2 = F.to_pil_image(img1//np.max(img1))
-    ## #img2.save('test1.png')           # looks better, actually gray
-    ## sys.exit()
-    
-    for b in range(B):
-        img = inputs[b,:,:,:]
-        img = img.transpose((1,2,0))
-        img = img*STD + MEAN
-        img = img.astype(int)
-        label = labels[b]
-        if int(label) == 0:
-            label = 'success'
-        else:
-            label = 'failure'
-        fname = 'tmp/{}_{}_{}.png'.format(phase, str(b).zfill(4), label)
-        cv2.imwrite(fname, img)
-
-
 def prepare_raw_data():
-    """Create the appropriate data for PyTorch.
+    """Create the appropriate data for PyTorch. Sources:
 
-    In particular, for classification, it's easiest to put them in their own
-    separate folders and then to use `ImageFolder`.
-
-    Tutorials:
-
-        https://pytorch.org/tutorials/beginner/data_loading_tutorial.html
-        https://pytorch.org/tutorials/beginner/transfer_learning_tutorial.html
-
-    Docs and support forums:
-
-        https://pytorch.org/docs/stable/torchvision/datasets.html?highlight=imagefolder#torchvision.datasets.ImageFolder
-        https://discuss.pytorch.org/t/questions-about-imagefolder/774
+    https://pytorch.org/tutorials/beginner/data_loading_tutorial.html
+    https://pytorch.org/tutorials/beginner/transfer_learning_tutorial.html
+    https://pytorch.org/docs/stable/torchvision/datasets.html?highlight=imagefolder#torchvision.datasets.ImageFolder
+    https://discuss.pytorch.org/t/questions-about-imagefolder/774
 
     If you need to call this again, delete the TARGET directory.
     """
@@ -189,37 +90,8 @@ def prepare_raw_data():
     print("std(numbers):  {}".format(np.std(numbers)))
 
 
-def pytorch_data():
-    """
-    Straight from the tutorial ... but let's see what happens when I play around
-    with different transformations.  I'm not sure how to deal with random
-    resizes and detection-based labels. But for classification, things should be
-    easier ... which is what I'm doing here with the transition network anyway.
 
-    If the transforms which deal with sizes don't resize to (224), then this
-    is the error message:
-
-      Traceback (most recent call last):
-    File "bedmake.py", line 257, in <module>
-      model = train(info, resnet18)
-    File "bedmake.py", line 215, in train
-      outputs = model(inputs)             # forward pass
-    File "/home/seita/seita-venvs/py2-torch/local/lib/python2.7/site-packages/torch/nn/modules/module.py", line 477, in __call__
-      result = self.forward(*input, **kwargs)
-    File "/home/seita/seita-venvs/py2-torch/local/lib/python2.7/site-packages/torchvision/models/resnet.py", line 151, in forward
-      x = self.fc(x)
-    File "/home/seita/seita-venvs/py2-torch/local/lib/python2.7/site-packages/torch/nn/modules/module.py", line 477, in __call__
-      result = self.forward(*input, **kwargs)
-    File "/home/seita/seita-venvs/py2-torch/local/lib/python2.7/site-packages/torch/nn/modules/linear.py", line 55, in forward
-      return F.linear(input, self.weight, self.bias)
-    File "/home/seita/seita-venvs/py2-torch/local/lib/python2.7/site-packages/torch/nn/functional.py", line 1024, in linear
-      return torch.addmm(bias, input, weight.t())
-    RuntimeError: size mismatch, m1: [32 x 2048], m2: [512 x 2] at /pytorch/aten/src/THC/generic/THCTensorMathBlas.cu:249
-
-    Which, is good. I don't think we can get away with improperly-sized input!!
-
-    `ToTensor()`: convert from `png` to Torch tensor.
-    """
+def train(model):
     data_transforms = {
         'train': transforms.Compose([
             transforms.RandomResizedCrop(224),
@@ -245,20 +117,6 @@ def pytorch_data():
                           for x in ['train', 'valid']}
     dataset_sizes  = {x: len(image_datasets[x]) for x in ['train', 'valid']}
     class_names    = image_datasets['train'].classes
-    info = {'data_transforms' : data_transforms,
-            'image_datasets' : image_datasets,
-            'dataloaders' : dataloaders,
-            'dataset_sizes' : dataset_sizes,
-            'class_names' : class_names}
-    return info
-
-
-def train(info, model):
-    data_transforms = info['data_transforms']
-    image_datasets  = info['image_datasets']
-    dataloaders     = info['dataloaders']
-    dataset_sizes   = info['dataset_sizes']
-    class_names     = info['class_names']
 
     # ADJUST CUDA DEVICE! Be careful about multi-GPU machines like the Tritons!!
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -350,11 +208,8 @@ def train(info, model):
 if __name__ == "__main__":
     # We only need to call this ONCE, then we can comment out since it creates
     # the data in the format we need for `ImageLoader`.
-    #prepare_raw_data()
-
-    # Prepare the ImageLoader.
-    info = pytorch_data()
+    prepare_raw_data()
 
     # Train the ResNet. Then I can do stuff with it ...  I get similar best
     # validation set performance with ResNet-{18,34,50}, fyi.
-    model = train(info, resnet18)
+    #model = train(info, resnet18)
