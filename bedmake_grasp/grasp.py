@@ -206,6 +206,46 @@ class RandomCrop(object):
         return {'image': image, 'target': (target_x, target_y)}
 
 
+class CenterCrop(object):
+    """Crop the image, in a *centered* manner!! Similar to RandomCrop except the
+    `top` and `left` parts are determined analytically.
+
+    Args:
+        output_size (tuple or int): Desired output size. If int, square crop.
+    """
+    def __init__(self, output_size):
+        assert isinstance(output_size, (int, tuple))
+        if isinstance(output_size, int):
+            self.output_size = (output_size, output_size)
+        else:
+            assert len(output_size) == 2
+            self.output_size = output_size
+
+    def __call__(self, sample):
+        image, target = sample['image'], sample['target']
+        h, w, channels = image.shape
+        assert channels == 3, channels
+        h, w = float(h), float(w)
+        new_h, new_w = self.output_size
+
+        # Intuition: we want to "remove" `w-new_w` pixels. So, starting from the
+        # left, randomly pick starting point, and only go `new_w` to the right.
+        # Since this is CENTERED we want to take the midpoint of these.
+        top  = int((h - new_h) / 2.0)
+        left = int((w - new_w) / 2.0)
+
+        image = image[top: top + new_h,
+                      left: left + new_w]
+        target_x = target[0] - left
+        target_y = target[1] - top
+
+        # Similar considerations as in `RandomCrop`.
+        target_x = min( max(target_x, 0.0), new_w )
+        target_y = min( max(target_y, 0.0), new_h )
+
+        return {'image': image, 'target': (target_x, target_y)}
+
+
 class HorizontalFlip(object):
     """AKA, a flip _about_ the *VERICAL* axis."""
 
@@ -246,14 +286,16 @@ def train(model, args):
         #ToTensor()
     ])
     transforms_valid = transforms.Compose([
-        Rescale((224,224)),
-        ToTensor()
+        Rescale((256,256)),
+        CenterCrop((224,224)),
+        #ToTensor()
     ])
     gdata_t = GraspDataset(infodir=DATA_TRAIN_INFO, transform=transforms_train)
     gdata_v = GraspDataset(infodir=DATA_VALID_INFO, transform=transforms_valid)
 
     for i in range(20):
         _save_viz(gdata_t[i], idx=i)
+        _save_viz(gdata_v[i], idx=i+1000)
 
     sys.exit()
     data_transforms = {
