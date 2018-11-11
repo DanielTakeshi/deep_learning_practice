@@ -1,38 +1,30 @@
-"""Let's see if I can train using the bed-making data I have.
-After running `prepare_raw_data()` only, I get:
-
-    done loading data, success 559 vs failure 582 (total 1141)
-    len(numbers):  350515200  (has the single-channel mean/std info)
-    mean(numbers): 93.709165437
-    std(numbers):  85.0125809655
-    
-    But, use this for actual mean/std because we want them in [0,256) ...
-    mean(scaled): 0.366051427488
-    std(scaled):  0.332080394397
-"""
+"""See README for results."""
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.optim import lr_scheduler
+
 import torchvision.models as models
+from torch.utils.data import Dataset, DataLoader
 from torchvision import datasets, transforms
+
 import argparse, copy, cv2, os, sys, pickle, time
 import numpy as np
 from os.path import join
 
-# Target is where we re-format the data for PyTorch convenience methods.
-# In the `cache` files, I already processed the depth images.
-HEAD   = '/nfs/diskstation/seita/bed-make/cache_combo_v03_success'
-
-# Move locally after data creation! With 10 epochs, I get an 8x speed-up: 4min -> 30sec.
-#TARGET = '/nfs/diskstation/seita/bed-make/cache_combo_v03_success_pytorch'
+# ------------------------------------------------------------------------------
+# Local data directory, from `prepare_data.py`.
 TARGET = 'cache_combo_v03_success_pytorch'
 
+# For the custom dataset we use.
+DATA_TRAIN_INFO = 'cache_combo_v03_pytorch/train/data_train_loader.pkl'
+DATA_VALID_INFO = 'cache_combo_v03_pytorch/valid/data_valid_loader.pkl'
+
+# For saving images+targets from minibatches, to inspect data augmentation.
 TMPDIR = 'tmp/'
 
-# From `prepare_raw_data`. Remember, we really have three channels.
-MEAN = [0.36605, 0.36605, 0.36605]
-STD  = [0.33208, 0.33208, 0.33208]
+# See `prepare_data.py`. Remember, we really have three channels.
+MEAN = [0.37468, 0.37468, 0.37468]
+STD  = [0.33259, 0.33259, 0.33259]
 
 # Pre-trained models
 resnet18 = models.resnet18(pretrained=True)
@@ -94,7 +86,123 @@ def _save_images(inputs, labels, phase):
         cv2.imwrite(fname, img)
 
 
+class GraspDataset(Dataset):
+    """Custom Grasp dataset, inspired by Face Landmarks dataset."""
+
+    def __init__(self, infodir, transform=None):
+        self.infodir = infodir
+        with open(self.infodir, 'r') as fh:
+            self.data = pickle.load(fh)
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        """As in the face landmarks, samples are dicts with images and labels."""
+        png_path, target = self.data[idx]
+        image = cv2.imread(png_path)
+        target = ( float(target[0]), float(target[1]) )
+        sample = {'image': image, 'target': target}
+        if self.transform:
+            sample = self.transform(sample)
+        return sample
+
+
+class ToTensor(object):
+    """Convert ndarrays in sample to Tensors."""
+
+    def __call__(self, sample):
+        image, target = sample['image'], sample['target']
+        # swap color axis because
+        # numpy image: H x W x C
+        # torch image: C X H X W
+        image = image.transpose((2, 0, 1))
+        return {'image': torch.from_numpy(image), 'target': torch.from_numpy(target)}
+
+
+class Rescale(object):
+    """Rescale the image in a sample to a given size.
+
+    Args:
+        output_size (tuple or int): Desired output size. If tuple, output is
+            matched to output_size. If int, smaller of image edges is matched
+            to output_size keeping aspect ratio the same.
+    """
+    def __init__(self, output_size):
+        assert isinstance(output_size, (int, tuple))
+        self.output_size = output_size
+
+    def __call__(self, sample):
+        image, landmarks = sample['image'], sample['landmarks']
+        h, w = image.shape[:2]
+
+        if isinstance(self.output_size, int):
+            if h > w:
+                new_h, new_w = self.output_size * h / w, self.output_size
+            else:
+                new_h, new_w = self.output_size, self.output_size * w / h
+        else:
+            new_h, new_w = self.output_size
+
+        new_h, new_w = int(new_h), int(new_w)
+        # Daniel: wait, where is `transform` coming from?
+        img = transform.resize(image, (new_h, new_w))
+
+        # h and w are swapped for landmarks because for images,
+        # x and y axes are axis 1 and 0 respectively
+        landmarks = landmarks * [new_w / w, new_h / h]
+        return {'image': img, 'landmarks': landmarks}
+
+
+class HorizontalFlip(object):
+    """AKA, a flip _about_ the *VERICAL* axis."""
+
+    def __init__(self, flipping_ratio=0.5):
+        self.flipping_ratio = 0.5
+
+    def __call__(self, sample):
+        """
+        If we want a 'vertical' flip (the 'intuitive' meaning) then second arg
+        in `cv2.flip()` is 0, not 1.  If we flip, need to adjust label, using
+        CURRENT image size, since it might have been resized earlier.
+        """
+        image, target = sample['image'], sample['target']
+        targetx, targety = target
+        if np.random.rand() < self.flipping_ratio:
+            h, w, c = image.shape
+            image = cv2.flip(image, 1)
+            targetx = w - target[0]
+        target = (targetx, targety)
+        return {'image': image, 'target': target}
+
+
+def _save_viz(sample, idx):
+    img, target = sample['image'], sample['target']
+    pose_int = int(target[0]),int(target[1])
+    cv2.circle(img, center=pose_int, radius=2, color=(0,0,255), thickness=-1)
+    cv2.circle(img, center=pose_int, radius=3, color=(0,0,0), thickness=1)
+    fname = join(TMPDIR, 'example_{}.png'.format(str(idx).zfill(4)))
+    cv2.imwrite(fname, img)
+
+
 def train(model, args):
+    transforms_train = transforms.Compose([
+        #Rescale(224),
+        HorizontalFlip(),
+        #ToTensor()
+    ])
+    transforms_valid = transforms.Compose([
+        Rescale(224),
+        ToTensor()
+    ])
+    gdata_t = GraspDataset(infodir=DATA_TRAIN_INFO, transform=transforms_train)
+    gdata_v = GraspDataset(infodir=DATA_VALID_INFO, transform=transforms_valid)
+
+    for i in range(10):
+        _save_viz(gdata_t[i], idx=i)
+
+    sys.exit()
     data_transforms = {
         'train': transforms.Compose([
             transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
@@ -222,13 +330,9 @@ def train(model, args):
 
 
 if __name__ == "__main__":
-    # We only need to call this ONCE, then we can comment out since it creates
-    # the data in the format we need for `ImageLoader`.
-    #prepare_raw_data()
-
     pp = argparse.ArgumentParser()
-    pp.add_argument('--optim', type=str)
-    pp.add_argument('--model', type=str)
+    pp.add_argument('--model', type=str, default='resnet18')
+    pp.add_argument('--optim', type=str, default='adam')
     pp.add_argument('--num_epochs', type=int, default=20)
     args = pp.parse_args() 
 
