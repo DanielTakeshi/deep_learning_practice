@@ -126,14 +126,15 @@ class ToTensor(object):
 
 
 class Rescale(object):
-    """Rescale the image in a sample to a given size, straight from tutorials.
+    """Rescale the image in a sample to a given size.
 
     Args:
         output_size (tuple or int): Desired output size. If tuple, output is
             matched to output_size. If int, smaller of image edges is matched
             to output_size keeping aspect ratio the same. NOTE: I am likely to
             use this only for making square images, but it might be useful to
-            keep the aspect ratio for later...
+            keep the aspect ratio for later... or we can rescale and THEN do the
+            random crop after that to make it square.
     """
 
     def __init__(self, output_size):
@@ -146,6 +147,8 @@ class Rescale(object):
         # In cv2, image.shape represents (height, width, channels).
         h, w, channels = image.shape
         h, w = float(h), float(w)
+        assert channels == 3, channels
+
         if isinstance(self.output_size, int):
             if h > w:
                 new_h, new_w = self.output_size * h / w, self.output_size
@@ -155,10 +158,52 @@ class Rescale(object):
             new_h, new_w = self.output_size
         new_h, new_w = int(new_h), int(new_w)
 
-        # Daniel: tutorial said h,w but cv2 uses w,h ... I tested, and we want w,h.
+        # Daniel: tutorial said h,w but cv2.resize uses w,h ... I tested it.
+        # Despite order of w,h here, for `img.shape` it's h,w,(channels). Confusing.
         img = cv2.resize(image, (new_w, new_h))
+
         target = ( target[0] * (new_w / w), target[1] * (new_h / h) )
         return {'image': img, 'target': target}
+
+
+class RandomCrop(object):
+    """Crop randomly the image in a sample.
+
+    Args:
+        output_size (tuple or int): Desired output size. If int, square crop.
+    """
+    def __init__(self, output_size):
+        assert isinstance(output_size, (int, tuple))
+        if isinstance(output_size, int):
+            self.output_size = (output_size, output_size)
+        else:
+            assert len(output_size) == 2
+            self.output_size = output_size
+
+    def __call__(self, sample):
+        image, target = sample['image'], sample['target']
+        h, w, channels = image.shape
+        assert channels == 3, channels
+        h, w = float(h), float(w)
+        new_h, new_w = self.output_size
+
+        # Intuition: we want to "remove" `w-new_w` pixels. So, starting from the
+        # left, randomly pick starting point, and only go `new_w` to the right.
+        top  = np.random.randint(0, h - new_h)
+        left = np.random.randint(0, w - new_w)
+
+        image = image[top: top + new_h,
+                      left: left + new_w]
+        target_x = target[0] - left
+        target_y = target[1] - top
+
+        # IMPORTANT! In detection, our targets could have been cropped out. To
+        # avoid this, only crop a little bit. That way we can 'approximate' it
+        # by thresholding the value to be within the image.
+        target_x = min( max(target_x, 0.0), new_w )
+        target_y = min( max(target_y, 0.0), new_h )
+
+        return {'image': image, 'target': (target_x, target_y)}
 
 
 class HorizontalFlip(object):
@@ -195,7 +240,8 @@ def _save_viz(sample, idx):
 def train(model, args):
     # To debug transformation(s), pick any one to run, get images, and save.
     transforms_train = transforms.Compose([
-        Rescale((224,224)),
+        Rescale((256,256)),
+        RandomCrop((224,224)),
         HorizontalFlip(),
         #ToTensor()
     ])
