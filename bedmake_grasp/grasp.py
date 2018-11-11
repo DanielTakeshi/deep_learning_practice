@@ -110,8 +110,11 @@ class GraspDataset(Dataset):
 
 
 class ToTensor(object):
-    """Convert ndarrays in sample to Tensors."""
-
+    """Convert ndarrays in sample to Tensors.
+    
+    Like in normal PyTorch's ToTensor() we scale pixel values to be in [0,1].
+    BUT we also need to scale the labels!!!
+    """
     def __call__(self, sample):
         image, target = sample['image'], sample['target']
         # swap color axis because
@@ -121,22 +124,28 @@ class ToTensor(object):
         return {'image': torch.from_numpy(image), 'target': torch.from_numpy(target)}
 
 
+
 class Rescale(object):
-    """Rescale the image in a sample to a given size.
+    """Rescale the image in a sample to a given size, straight from tutorials.
 
     Args:
         output_size (tuple or int): Desired output size. If tuple, output is
             matched to output_size. If int, smaller of image edges is matched
-            to output_size keeping aspect ratio the same.
+            to output_size keeping aspect ratio the same. NOTE: I am likely to
+            use this only for making square images, but it might be useful to
+            keep the aspect ratio for later...
     """
+
     def __init__(self, output_size):
         assert isinstance(output_size, (int, tuple))
         self.output_size = output_size
 
     def __call__(self, sample):
-        image, landmarks = sample['image'], sample['landmarks']
-        h, w = image.shape[:2]
+        image, target = sample['image'], sample['target']
 
+        # In cv2, image.shape represents (height, width, channels).
+        h, w, channels = image.shape
+        h, w = float(h), float(w)
         if isinstance(self.output_size, int):
             if h > w:
                 new_h, new_w = self.output_size * h / w, self.output_size
@@ -144,15 +153,12 @@ class Rescale(object):
                 new_h, new_w = self.output_size, self.output_size * w / h
         else:
             new_h, new_w = self.output_size
-
         new_h, new_w = int(new_h), int(new_w)
-        # Daniel: wait, where is `transform` coming from?
-        img = transform.resize(image, (new_h, new_w))
 
-        # h and w are swapped for landmarks because for images,
-        # x and y axes are axis 1 and 0 respectively
-        landmarks = landmarks * [new_w / w, new_h / h]
-        return {'image': img, 'landmarks': landmarks}
+        # Daniel: tutorial said h,w but cv2 uses w,h ... I tested, and we want w,h.
+        img = cv2.resize(image, (new_w, new_h))
+        target = ( target[0] * (new_w / w), target[1] * (new_h / h) )
+        return {'image': img, 'target': target}
 
 
 class HorizontalFlip(object):
@@ -187,19 +193,20 @@ def _save_viz(sample, idx):
 
 
 def train(model, args):
+    # To debug transformation(s), pick any one to run, get images, and save.
     transforms_train = transforms.Compose([
-        #Rescale(224),
+        Rescale((224,224)),
         HorizontalFlip(),
         #ToTensor()
     ])
     transforms_valid = transforms.Compose([
-        Rescale(224),
+        Rescale((224,224)),
         ToTensor()
     ])
     gdata_t = GraspDataset(infodir=DATA_TRAIN_INFO, transform=transforms_train)
     gdata_v = GraspDataset(infodir=DATA_VALID_INFO, transform=transforms_valid)
 
-    for i in range(10):
+    for i in range(20):
         _save_viz(gdata_t[i], idx=i)
 
     sys.exit()
