@@ -113,16 +113,31 @@ class ToTensor(object):
     """Convert ndarrays in sample to Tensors.
     
     Like in normal PyTorch's ToTensor() we scale pixel values to be in [0,1].
-    BUT we also need to scale the labels!!!
+    BUT we should also scale the labels to better condition the optimization.
+
+    https://github.com/pytorch/vision/blob/master/torchvision/transforms/transforms.py#L70
+    https://github.com/pytorch/vision/blob/master/torchvision/transforms/functional.py#L38
+
+    The first link, the transform, calls the second one, the functional. There
+    are cases for ndarrays and PIL images, but we should only deal w/the former.
     """
     def __call__(self, sample):
         image, target = sample['image'], sample['target']
+        assert isinstance(image, np.ndarray), image
+        assert isinstance(target, tuple), target
+
         # swap color axis because
         # numpy image: H x W x C
         # torch image: C X H X W
         image = image.transpose((2, 0, 1))
-        return {'image': torch.from_numpy(image), 'target': torch.from_numpy(target)}
 
+        # Convert to numpy, but we need to then divide by 255.
+        image  = torch.from_numpy( image )
+        target = torch.from_numpy( np.array(target) )
+        assert isinstance(image, torch.ByteTensor), image
+        image  = image.float().div(255)
+        target = target.div(255)         # these are already floats
+        return {'image': image, 'target': target}
 
 
 class Rescale(object):
@@ -246,7 +261,7 @@ class CenterCrop(object):
         return {'image': image, 'target': (target_x, target_y)}
 
 
-class HorizontalFlip(object):
+class RandomHorizontalFlip(object):
     """AKA, a flip _about_ the *VERICAL* axis."""
 
     def __init__(self, flipping_ratio=0.5):
@@ -282,22 +297,24 @@ def train(model, args):
     transforms_train = transforms.Compose([
         Rescale((256,256)),
         RandomCrop((224,224)),
-        HorizontalFlip(),
-        #ToTensor()
+        RandomHorizontalFlip(),
+        ToTensor()
     ])
     transforms_valid = transforms.Compose([
         Rescale((256,256)),
         CenterCrop((224,224)),
-        #ToTensor()
+        ToTensor()
     ])
     gdata_t = GraspDataset(infodir=DATA_TRAIN_INFO, transform=transforms_train)
     gdata_v = GraspDataset(infodir=DATA_VALID_INFO, transform=transforms_valid)
 
+    # Can debug here, but only works if `ToTensor()` above is commented out!
     for i in range(20):
-        _save_viz(gdata_t[i], idx=i)
-        _save_viz(gdata_v[i], idx=i+1000)
-
+        print(gdata_t[i]['target'])
+        #_save_viz(gdata_t[i], idx=i)
+        #_save_viz(gdata_v[i], idx=i+1000)
     sys.exit()
+
     data_transforms = {
         'train': transforms.Compose([
             transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
