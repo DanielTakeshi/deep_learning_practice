@@ -14,4 +14,7 @@ support_request/debug_img/
 support_request/tmp/
 support_request/*.pkl
 
+bedmake_grasp/cache_combo_v03_pytorch/
 bedmake_transition/cache_combo_v03_success_pytorch/
+
+torch/faces

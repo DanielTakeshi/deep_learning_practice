@@ -116,8 +116,8 @@ def prepare_raw_data():
     print("mean(numbers): {}".format(np.mean(numbers)))
     print("std(numbers):  {}".format(np.std(numbers)))
     print("\nBut, use this for actual mean/std because we want them in [0,256) ...")
-    print("mean(scaled): {}".format(np.mean(numbers/256.0)))
-    print("std(scaled):  {}".format(np.std(numbers/256.0)))
+    print("mean(scaled): {}".format(np.mean(numbers/255.0)))
+    print("std(scaled):  {}".format(np.std(numbers/255.0)))
 
 
 def _save_images(inputs, labels, phase):
