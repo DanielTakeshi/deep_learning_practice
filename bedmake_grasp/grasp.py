@@ -6,6 +6,7 @@ import torch.optim as optim
 import torchvision.models as models
 from torch.utils.data import Dataset, DataLoader
 from torchvision import datasets, transforms
+from torchvision.transforms import functional as F
 
 import argparse, copy, cv2, os, sys, pickle, time
 import numpy as np
@@ -107,6 +108,25 @@ class GraspDataset(Dataset):
         if self.transform:
             sample = self.transform(sample)
         return sample
+
+
+class Normalize(object):
+    """Normalize.
+    
+    https://github.com/pytorch/vision/blob/master/torchvision/transforms/transforms.py#L129
+    https://github.com/pytorch/vision/blob/master/torchvision/transforms/functional.py#L157
+
+    Actually we can just call the functional ...
+    """
+    def __init__(self, mean, std):
+        self.mean = mean
+        self.std = std
+
+    def __call__(self, sample):
+        image, target = sample['image'], sample['target']
+        assert image.shape[0] == 3, image.shape
+        image = F.normalize(image, self.mean, self.std)
+        return {'image': image, 'target': target}
 
 
 class ToTensor(object):
@@ -298,53 +318,34 @@ def train(model, args):
         Rescale((256,256)),
         RandomCrop((224,224)),
         RandomHorizontalFlip(),
-        ToTensor()
+        ToTensor(),
+        Normalize(MEAN, STD),
     ])
     transforms_valid = transforms.Compose([
         Rescale((256,256)),
         CenterCrop((224,224)),
-        ToTensor()
+        ToTensor(),
+        Normalize(MEAN, STD),
     ])
+
     gdata_t = GraspDataset(infodir=DATA_TRAIN_INFO, transform=transforms_train)
     gdata_v = GraspDataset(infodir=DATA_VALID_INFO, transform=transforms_valid)
 
-    # Can debug here, but only works if `ToTensor()` above is commented out!
-    for i in range(20):
-        print(gdata_t[i]['target'])
-        #_save_viz(gdata_t[i], idx=i)
-        #_save_viz(gdata_v[i], idx=i+1000)
-    sys.exit()
+    # Can debug here, but only works if we didn't call `ToTensor()` (+normalize).
+    #for i in range(20):
+    #    print(gdata_t[i]['target'])
+    #    _save_viz(gdata_t[i], idx=i)
+    #    _save_viz(gdata_v[i], idx=i+1000)
 
-    data_transforms = {
-        'train': transforms.Compose([
-            transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(MEAN, STD)
-        ]),
-        'valid': transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            transforms.Normalize(MEAN, STD)
-        ]),
+    dataloaders = {
+        'train': DataLoader(gdata_t, batch_size=32, shuffle=True, num_workers=8),
+        'valid': DataLoader(gdata_v, batch_size=32, shuffle=False, num_workers=8),
     }
-    
-    # So, ImageFolder (within the `train/` and `valid/`) requires images to be
-    # stored within sub-directories based on their labels. Also, I wonder, maybe
-    # better to drop the last batch for the DataLoader?
-    image_datasets = {x: datasets.ImageFolder(join(TARGET,x), data_transforms[x]) 
-                        for x in ['train', 'valid']}
-    dataloaders    = {x: torch.utils.data.DataLoader(image_datasets[x],
-                        batch_size=32, shuffle=True, num_workers=4)
-                          for x in ['train', 'valid']}
-    dataset_sizes  = {x: len(image_datasets[x]) for x in ['train', 'valid']}
-    class_names    = image_datasets['train'].classes
+    dataset_sizes = {'train': len(gdata_t), 'valid': len(gdata_v)}
 
     # ADJUST CUDA DEVICE! Be careful about multi-GPU machines like the Tritons!!
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print("\nNow training!! On device: {}".format(device))
-    print("class_names: {}".format(class_names))
     print("dataset_sizes: {}\n".format(dataset_sizes))
 
     # Get things setup. Since ResNet has 1000 outputs, we need to adjust the
@@ -355,22 +356,21 @@ def train(model, args):
     model = model.to(device)
 
     # Loss function & optimizer
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.MSELoss()
     if args.optim == 'sgd':
         optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
-        # not doing now, but could decay LR by factor of 0.1 every 7 epochs
-        #scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
     elif args.optim == 'adam':
         optimizer = optim.Adam(model.parameters(), lr=0.0001)
     else:
         raise ValueError(args.optim)
 
     # --------------------------------------------------------------------------
-    # FINALLY TRAINING!!
+    # FINALLY TRAINING!! Here, track loss and the 'original' loss in raw pixels.
     # --------------------------------------------------------------------------
     since = time.time()
     best_model_wts = copy.deepcopy(model.state_dict())
-    best_acc = 0.0
+    best_loss     = np.float('inf')
+    best_loss_pix = np.float('inf')
     all_train = []
     all_valid = []
 
@@ -378,34 +378,30 @@ def train(model, args):
         print('\nEpoch {}/{}'.format(epoch, args.num_epochs-1))
         print('-' * 20)
 
-        # Each epoch has a training and validation phase
+        # Each epoch has a training and validation phase.
         # Epochs automatically tracked via the for loop over `dataloaders`.
         for phase in ['train', 'valid']:
             if phase == 'train':
-                #scheduler.step() # not doing this for now
-                model.train()  # Set model to training mode
+                model.train()
             else:
-                model.eval()   # Set model to evaluate mode
+                model.eval()
 
-            running_loss = 0.0
-            running_corrects = 0
+            running_loss     = 0.0
+            running_loss_pix = 0.0
 
-            # Iterate over data and labels (minibatches), by default, for one
-            # epoch. Data augmentation happens here on the fly. :-)
-            for inputs, labels in dataloaders[phase]:
-                inputs = inputs.to(device)
-                labels = labels.to(device)
-                #_save_images(inputs, labels, phase)
-                #sys.exit()
+            # Iterate over data and labels (minibatches), by default, one epoch.
+            for minibatch in dataloaders[phase]:
+                inputs = (minibatch['image']).to(device)    # (B,3,224,224)
+                labels = (minibatch['target']).to(device)   # (B,2)
 
                 # zero the parameter gradients
                 optimizer.zero_grad()
 
                 # forward: track (gradient?) history _only_ if training
+                # Confused, I need `labels.float()` even though `labels` should be a float!
                 with torch.set_grad_enabled(phase == 'train'):
-                    outputs = model(inputs)             # forward pass
-                    _, preds = torch.max(outputs, 1)    # returns (max vals, indices)
-                    loss = criterion(outputs, labels)
+                    outputs = model(inputs)
+                    loss = criterion(outputs, labels.float())
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
@@ -413,26 +409,28 @@ def train(model, args):
                         optimizer.step()
 
                 running_loss += loss.item() * inputs.size(0)
-                running_corrects += torch.sum(preds == labels.data)
+                #running_loss_pix += ... TODO
 
             # We summed (not averaged) the losses earlier, so divide by full size.
             epoch_loss = running_loss / dataset_sizes[phase]
-            epoch_acc = running_corrects.double() / dataset_sizes[phase]
-            print('({})  Loss: {:.4f}, Acc: {:.4f} (num: {})'.format(
-                    phase, epoch_loss, epoch_acc, running_corrects))
+            epoch_loss_pix = 0.0
+            #epoch_loss_pix = ... TODO
+
+            print('({})  Loss: {:.4f}, LossPix: {:.4f}'.format(
+                    phase, epoch_loss, epoch_loss_pix))
             if phase == 'train':
-                all_train.append(round(epoch_acc.item(),3))
+                all_train.append(round(epoch_loss,4))
             else:
-                all_valid.append(round(epoch_acc.item(),3))
+                all_valid.append(round(epoch_loss,4))
 
             # deep copy the model, use `state_dict()`.
-            if phase == 'valid' and epoch_acc > best_acc:
-                best_acc = epoch_acc
+            if phase == 'valid' and epoch_loss < best_loss:
+                best_loss = epoch_loss
                 best_model_wts = copy.deepcopy(model.state_dict())
 
     time_elapsed = time.time() - since
     print('\nTrained in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
-    print('Best val Acc: {:4f}'.format(best_acc))
+    print('Best epoch losses: {:4f}  (pix: {:.4f})'.format(best_loss, best_loss_pix))
     print('train:  {}'.format(all_train))
     print('valid:  {}'.format(all_valid))
 
