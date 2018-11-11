@@ -89,8 +89,10 @@ def prepare_raw_data():
                 else:
                     pname = path_valid
 
-                target = "{}-{}".format(item['pose'][0], item['pose'][1])
-                suffix = 'd_{}_{}_{}.png'.format(str(p_idx).zfill(2), str(idx).zfill(4), target)
+                target_str = "{}-{}".format(item['pose'][0], item['pose'][1])
+                target_tuple = (item['pose'][0], item['pose'][1])
+
+                suffix = 'd_{}_{}_{}.png'.format(str(p_idx).zfill(2), str(idx).zfill(4), target_str)
                 png_name = join(pname, suffix)
 
                 # Accumulate statistics for mean and std computation across our
@@ -103,10 +105,10 @@ def prepare_raw_data():
 
                 # Don't forget! Add info to our data loaders!!
                 if idx in indx_train:
-                    loader_train_dict.append( (png_name, target) )
+                    loader_train_dict.append( (png_name, target_tuple) )
                     total_train += 1
                 else:
-                    loader_valid_dict.append( (png_name, target) )
+                    loader_valid_dict.append( (png_name, target_tuple) )
                     total_valid += 1
 
     assert len(loader_train_dict) == total_train
