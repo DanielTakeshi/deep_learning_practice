@@ -15,7 +15,7 @@ support_request/tmp/
 support_request/*.pkl
 
 bedmake_grasp/cache_combo_v03_pytorch/
-bedmake_grasp/tmp/
+bedmake_grasp/tmp_*/
 bedmake_transition/cache_combo_v03_success_pytorch/
 bedmake_transition/tmp/
 

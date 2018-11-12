@@ -21,7 +21,14 @@ DATA_TRAIN_INFO = 'cache_combo_v03_pytorch/train/data_train_loader.pkl'
 DATA_VALID_INFO = 'cache_combo_v03_pytorch/valid/data_valid_loader.pkl'
 
 # For saving images+targets from minibatches, to inspect data augmentation.
-TMPDIR = 'tmp/'
+TMPDIR1 = 'tmp_augm/'
+if not os.path.exists(TMPDIR1):
+    os.makedirs(TMPDIR1)
+
+# For saving images+targets for model predictions, to inspect accuracy.
+TMPDIR2 = 'tmp_model/'
+if not os.path.exists(TMPDIR2):
+    os.makedirs(TMPDIR2)
 
 # See `prepare_data.py`. Remember, we really have three channels.
 MEAN = [0.37468, 0.37468, 0.37468]
@@ -34,7 +41,7 @@ resnet50 = models.resnet50(pretrained=True)
 # ------------------------------------------------------------------------------
 
 
-def _save_images(inputs, labels, phase):
+def _save_images(inputs, labels, outputs, loss, phase):
     """Debugging the data transformations, labels, etc.
 
     OpenCV can't save if you use floats. You need: `img = img.astype(int)`.
@@ -42,28 +49,21 @@ def _save_images(inputs, labels, phase):
     But PyTorch puts the channels earlier ... (channel,height,width).
     The raw depth images in the pickle files were of shape (480,640,3).
 
-    Given `img` from a PyTorch Tensor, it will be of shape (3,224,224) with
-    ResNet pre-processing. For this, DON'T use `img = img.swapaxes(0,2)` as that
-    will not correctly change the axes; it rotates the image. The docs say:
-
-    https://pytorch.org/docs/stable/torchvision/transforms.html#torchvision.transforms.ToPILImage
-        Converts a torch.*Tensor of shape C x H x W or a numpy ndarray of shape
-        H x W x C to a PIL Image while preserving the value range.
-
-    Thus, we need `img = img.transpose((1,2,0))`. Then channel goes at the end
-    BUT the height and width are also both 'translated' over to the first (i.e.,
-    0-th index) and second channels, respectively.
+    Right now, the un-normalized images and predictions are for the RESIZED AND
+    CROPPED images. Getting the 'true' un-normalized ones for the validation set
+    can be done, but the training ones will require some knowledge of what we
+    used for random cropping.
     """
-    assert not os.path.exists(TMPDIR), "directory exists:\n\t{}".format(TMPDIR)
-    os.makedirs(TMPDIR)
-
     # Extract numpy tensor on the CPU.
     inputs = inputs.cpu().numpy()
-    B = inputs.shape[0]
+    labels = labels.cpu().numpy()
+    preds  = outputs.cpu().numpy()
 
     # Iterate through all (data-augmented) images in minibatch and save.
-    for b in range(B):
-        img = inputs[b,:,:,:]
+    for b in range(inputs.shape[0]):
+        img  = inputs[b,:,:,:]
+        targ = labels[b,:]
+        pred = preds[b,:]
 
         # A good sanity check, all channels of _processed_ image have same sum.
         # Alsom, transpose to get 3-channel at the _end_, so shape (224,224,3).
@@ -76,14 +76,26 @@ def _save_images(inputs, labels, phase):
         img = img*255.0
         img = img.astype(int)
 
-        # 0 means it is 'success' (i.e., blanket covered), 1 is failure.
-        label = labels[b]
-        if int(label) == 0:
-            label = 'success'
-        else:
-            label = 'failure'
+        # And similarly, for predictions.
+        targ = targ*255.0
+        pred = pred*255.0
+        targ_int = int(targ[0]), int(targ[1])
+        pred_int = int(pred[0]), int(pred[1])
 
-        fname = '{}/{}_{}_{}.png'.format(TMPDIR, phase, str(b).zfill(4), label)
+        # Computing 'raw' L2, well for the (224,224) input image ...
+        L2_pix = np.linalg.norm(targ - pred)
+        # Later, I can do additional 'un-processing' to get truly original L2s.
+
+        # Overlay prediction vs target.
+        # Using `img` gets a weird OpenCV error, I had to add 'contiguous' here.
+        img = np.ascontiguousarray(img, dtype=np.uint8)
+        cv2.circle(img, center=targ_int, radius=2, color=(0,0,255), thickness=-1)
+        cv2.circle(img, center=targ_int, radius=3, color=(0,0,0),   thickness=1)
+        cv2.circle(img, center=pred_int, radius=2, color=(255,0,0), thickness=-1)
+        cv2.circle(img, center=pred_int, radius=3, color=(0,255,0), thickness=1)
+
+        # Inspect!
+        fname = '{}/{}_{}_{:.0f}.png'.format(TMPDIR2, phase, str(b).zfill(4), L2_pix)
         cv2.imwrite(fname, img)
 
 
@@ -115,7 +127,7 @@ def _save_viz(sample, idx):
     pose_int = int(target[0]),int(target[1])
     cv2.circle(img, center=pose_int, radius=2, color=(0,0,255), thickness=-1)
     cv2.circle(img, center=pose_int, radius=3, color=(0,0,0), thickness=1)
-    fname = join(TMPDIR, 'example_{}.png'.format(str(idx).zfill(4)))
+    fname = join(TMPDIR1, 'example_{}.png'.format(str(idx).zfill(4)))
     cv2.imwrite(fname, img)
 
 
@@ -215,13 +227,21 @@ def train(model, args):
                         loss.backward()
                         optimizer.step()
 
+                # TODO:  later double check this, I think this works if we want
+                # the L2 for the (224,224) images that the network actually sees.
+                # Need to also know cpu() and detach().
+
+                targ = labels.cpu().numpy() * 255.0
+                pred = outputs.detach().cpu().numpy() * 255.0
+                delta = targ - pred  # shape (B,2)
+                L2_pix = np.mean( np.linalg.norm(delta,axis=1) )
+
                 running_loss += loss.item() * inputs.size(0)
-                #running_loss_pix += ... TODO
+                running_loss_pix += L2_pix * inputs.size(0)
 
             # We summed (not averaged) the losses earlier, so divide by full size.
-            epoch_loss = running_loss / dataset_sizes[phase]
-            epoch_loss_pix = 0.0
-            #epoch_loss_pix = ... TODO
+            epoch_loss = running_loss / float(dataset_sizes[phase])
+            epoch_loss_pix = running_loss_pix / float(dataset_sizes[phase])
 
             print('({})  Loss: {:.4f}, LossPix: {:.4f}'.format(
                     phase, epoch_loss, epoch_loss_pix))
@@ -233,6 +253,7 @@ def train(model, args):
             # deep copy the model, use `state_dict()`.
             if phase == 'valid' and epoch_loss < best_loss:
                 best_loss = epoch_loss
+                best_loss_pix = epoch_loss_pix
                 best_model_wts = copy.deepcopy(model.state_dict())
 
     time_elapsed = time.time() - since
@@ -241,8 +262,22 @@ def train(model, args):
     print('train:  {}'.format(all_train))
     print('valid:  {}'.format(all_valid))
 
-    # load best model weights
+    # Load best model weights
     model.load_state_dict(best_model_wts)
+
+    # Can make predictions on one minibatch just to confirm.
+    print("\nChecking performance on one validation set minibatch:")
+    model.eval()
+    for minibatch in dataloaders['valid']:
+        inputs = (minibatch['image']).to(device)
+        labels = (minibatch['target']).to(device)
+        optimizer.zero_grad()
+        with torch.set_grad_enabled(False):
+            outputs = model(inputs)
+            loss = criterion(outputs, labels.float())
+        _save_images(inputs, labels, outputs, loss, phase='valid')
+        break
+
     return model
 
 
