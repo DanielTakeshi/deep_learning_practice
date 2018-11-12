@@ -1,7 +1,10 @@
 # Self-Supervised Learning (SSL)
 
-I need to adjust the transforms to deal with pairs of images and
-with the action parameterization we use.
+In progress:
+
+- Adjust `custom_transforms.py` to deal with pairs of images and with the action parameterization we
+  use.
+- Fix `ryan_data.py` to actually use and train on his data.
 
 With the appropriate data, `python prepare_data.py` results in:
 
