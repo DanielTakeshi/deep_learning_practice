@@ -39,8 +39,10 @@ TARGET = 'cache_combo_v03_pytorch'
 # ------------------------------------------------------------------------------
 
 
-def prepare_raw_data():
+def prepare_daniel_data():
     """Create appropriate data for PyTorch. Delete target directory if needed.
+
+    This is from our ICRA 2019 paper submission, for GRASPING.
     
     Unlike in classification, we don't need to create a complicated directory
     system, but I think it's helpful to have the images saved with the targets
@@ -92,7 +94,8 @@ def prepare_raw_data():
                 target_str = "{}-{}".format(item['pose'][0], item['pose'][1])
                 target_tuple = (item['pose'][0], item['pose'][1])
 
-                suffix = 'd_{}_{}_{}.png'.format(str(p_idx).zfill(2), str(idx).zfill(4), target_str)
+                suffix = 'd_{}_{}_{}.png'.format(str(p_idx).zfill(2), 
+                        str(idx).zfill(4), target_str)
                 png_name = join(pname, suffix)
 
                 # Accumulate statistics for mean and std computation across our
@@ -122,7 +125,7 @@ def prepare_raw_data():
     print("done loading data, train {} & valid {} (total {})".format(
             total_train, total_valid, total_train+total_valid))
     numbers = np.array(numbers)
-    print("len(numbers):  {}  (has the single-channel mean/std info)".format(len(numbers)))
+    print("len(numbers):  {}  (has single-channel mean/std info)".format(len(numbers)))
     print("mean(numbers): {}".format(np.mean(numbers)))
     print("std(numbers):  {}".format(np.std(numbers)))
     print("\nBut, use this for actual mean/std because we want them in [0,256) ...")
@@ -131,4 +134,4 @@ def prepare_raw_data():
 
 
 if __name__ == "__main__":
-    prepare_raw_data()
+    prepare_daniel_data()

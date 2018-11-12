@@ -216,8 +216,8 @@ def train(model, args):
                 # zero the parameter gradients
                 optimizer.zero_grad()
 
-                # forward: track (gradient?) history _only_ if training. Confused,
-                # I need `labels.float()` even though `labels` should be a float!
+                # forward: track (gradient?) history _only_ if training
+                # Confused, I need `labels.float()` even though `labels` should be a float!
                 with torch.set_grad_enabled(phase == 'train'):
                     outputs = model(inputs)
                     loss = criterion(outputs, labels.float())
@@ -229,7 +229,7 @@ def train(model, args):
 
                 # TODO:  later double check this, I think this works if we want
                 # the L2 for the (224,224) images that the network actually sees.
-                # Need to also understand cpu() and detach().
+                # Need to also know cpu() and detach().
 
                 targ = labels.cpu().numpy() * 255.0
                 pred = outputs.detach().cpu().numpy() * 255.0
