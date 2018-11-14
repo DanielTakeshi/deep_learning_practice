@@ -39,10 +39,11 @@ class Normalize(object):
         new_sample = {
             'img_t':      img_t,
             'img_tp1':    img_tp1, 
-            'target_xy':  sample['target_xy'],
-            'target_l':   sample['target_l'],
-            'target_ang': sample['target_ang'],
-            'raw_ang':    sample['raw_ang'],
+            #'target_xy':  sample['target_xy'],
+            #'target_l':   sample['target_l'],
+            #'target_ang': sample['target_ang'],
+            #'raw_ang':    sample['raw_ang'],
+            'label':      sample['label'],
         }
         return new_sample
 
@@ -85,7 +86,7 @@ class ToTensor(object):
         target = np.array([
             sample['target_xy'][0] / float(w),
             sample['target_xy'][1] / float(h),
-            sample['target_l'] / 20.0,
+            sample['target_l'][0] / 20.0,
             sample['target_ang'][0],
             sample['target_ang'][1],
             sample['target_ang'][2],
@@ -356,12 +357,12 @@ class BedGraspDataset(Dataset):
         # Keep `raw_ang` constant, as 0, 90, 180, 270. Do _not_ change it. The
         # network will not use it. It is for making transforms easier to write.
         sample = {
-            'img_t': img_t,
-            'img_tp1': img_tp1, 
-            'target_xy': target_xy,
-            'target_l': target_l,
+            'img_t':      img_t,
+            'img_tp1':    img_tp1, 
+            'target_xy':  target_xy,
+            'target_l':   target_l,
             'target_ang': target_ang,
-            'raw_ang': a_t['angle']
+            'raw_ang':    a_t['angle']
         }
 
         if self.transform:

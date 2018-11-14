@@ -135,9 +135,6 @@ def train(model, args):
     model.fc = nn.Linear(num_penultimate_layer, 2)
     model = model.to(device)
 
-    # TODO now fix and include the dual architecture? Siamese?
-    sys.exit()
-
     # Loss function & optimizer
     criterion = nn.MSELoss()
     if args.optim == 'sgd':
@@ -173,9 +170,13 @@ def train(model, args):
             running_loss_pix = 0.0
 
             # Iterate over data and labels (minibatches), by default, one epoch.
-            for minibatch in dataloaders[phase]:
-                inputs = (minibatch['image']).to(device)    # (B,3,224,224)
-                labels = (minibatch['target']).to(device)   # (B,2)
+            for mb in dataloaders[phase]:
+                input_t   = (mb['img_t']).to(device)    # (B,3,224,224)
+                input_tp1 = (mb['img_tp1']).to(device)  # (B,3,224,224)
+                labels    = (mb['label']).to(device)    # (B,7) if all in one vec
+
+                # TODO STOPPING HERE, we need to get the network fixed
+                sys.exit()
 
                 # zero the parameter gradients
                 optimizer.zero_grad()
