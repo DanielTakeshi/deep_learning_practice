@@ -30,8 +30,8 @@ if not os.path.exists(TMPDIR2):
     os.makedirs(TMPDIR2)
 
 # See output of `prepare_data.py`.
-MEAN = [0.41947472 0.40256495 0.41423752]
-STD  = [0.43009408 0.43955658 0.44744617]
+MEAN = [0.41979732, 0.40260704, 0.4141044 ]
+STD  = [0.43067302, 0.44038301, 0.44804261]
 
 # Pre-trained models
 resnet18 = models.resnet18(pretrained=True)
@@ -114,8 +114,8 @@ def train(model, args):
         CT.Normalize(MEAN, STD),
     ])
 
-    gdata_t = GraspDataset(infodir=DATA_TRAIN_INFO, transform=transforms_train)
-    gdata_v = GraspDataset(infodir=DATA_VALID_INFO, transform=transforms_valid)
+    gdata_t = CT.BedGraspDataset(infodir=TRAIN_INFO, transform=transforms_train)
+    gdata_v = CT.BedGraspDataset(infodir=VALID_INFO, transform=transforms_valid)
 
     dataloaders = {
         'train': DataLoader(gdata_t, batch_size=32, shuffle=True, num_workers=8),
@@ -134,6 +134,9 @@ def train(model, args):
     num_penultimate_layer = model.fc.in_features
     model.fc = nn.Linear(num_penultimate_layer, 2)
     model = model.to(device)
+
+    # TODO now fix and include the dual architecture? Siamese?
+    sys.exit()
 
     # Loss function & optimizer
     criterion = nn.MSELoss()

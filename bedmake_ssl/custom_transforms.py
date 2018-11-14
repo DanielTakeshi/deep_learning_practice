@@ -355,9 +355,14 @@ class BedGraspDataset(Dataset):
 
         # Keep `raw_ang` constant, as 0, 90, 180, 270. Do _not_ change it. The
         # network will not use it. It is for making transforms easier to write.
-        sample = {'img_t': img_t, 'img_tp1': img_tp1, 
-                  'target_xy': target_xy, 'target_l': target_l,
-                  'target_ang': target_ang, 'raw_ang': a_t['angle']}
+        sample = {
+            'img_t': img_t,
+            'img_tp1': img_tp1, 
+            'target_xy': target_xy,
+            'target_l': target_l,
+            'target_ang': target_ang,
+            'raw_ang': a_t['angle']
+        }
 
         if self.transform:
             sample = self.transform(sample)
@@ -443,9 +448,9 @@ if __name__ == "__main__":
     print("len(train):  {}".format(len(gdata_t)))
     print("len(valid):  {}".format(len(gdata_v)))
 
-    #for i in range(len(gdata_t)):
-    #    _save_viz(gdata_t[i], idx=i)
-    #for i in range(len(gdata_v)):
-    #    # idx only means we change file names so it doesn't conflict w/earlier
-    #    _save_viz(gdata_v[i], idx=i+1000)
+    for i in range(len(gdata_t)):
+        _save_viz(gdata_t[i], idx=i)
+    for i in range(len(gdata_v)):
+        # idx only means we change file names so it doesn't conflict w/earlier
+        _save_viz(gdata_v[i], idx=i+1000)
 
