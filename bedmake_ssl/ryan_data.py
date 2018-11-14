@@ -99,29 +99,6 @@ def _save_images(inputs, labels, outputs, loss, phase):
         cv2.imwrite(fname, img)
 
 
-class GraspDataset(Dataset):
-    """Custom Grasp dataset, inspired by Face Landmarks dataset."""
-
-    def __init__(self, infodir, transform=None):
-        self.infodir = infodir
-        with open(self.infodir, 'r') as fh:
-            self.data = pickle.load(fh)
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        """As in the face landmarks, samples are dicts with images and labels."""
-        png_path, target = self.data[idx]
-        image = cv2.imread(png_path)
-        target = ( float(target[0]), float(target[1]) )
-        sample = {'image': image, 'target': target}
-        if self.transform:
-            sample = self.transform(sample)
-        return sample
-
-
 def _save_viz(sample, idx):
     img, target = sample['image'], sample['target']
     pose_int = int(target[0]),int(target[1])

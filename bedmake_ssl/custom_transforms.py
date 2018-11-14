@@ -1,12 +1,38 @@
 """
 My custom transforms that I use, mainly for detection and non-classification
 stuff. (If doing classification just borrow the ones from torchvision.)
+Also the dataset class.
 """
 import cv2, os, sys
 import numpy as np
 import torch
 from torchvision.transforms import functional as F
 
+
+class GraspDataset(Dataset):
+    """Custom dataset, inspired by Face Landmarks dataset."""
+
+    def __init__(self, infodir, transform=None):
+        self.infodir = infodir
+        with open(self.infodir, 'r') as fh:
+            self.data = pickle.load(fh)
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        """As in the face landmarks, samples are dicts with images and labels."""
+        png_path, target = self.data[idx]
+        image = cv2.imread(png_path)
+        target = ( float(target[0]), float(target[1]) )
+        sample = {'image': image, 'target': target}
+        if self.transform:
+            sample = self.transform(sample)
+        return sample
+
+
+#TODO BELOW
 
 class Normalize(object):
     """Normalize.
