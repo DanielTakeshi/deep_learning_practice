@@ -102,7 +102,7 @@ class ToTensor(object):
 
 
 class Rescale(object):
-    """Rescale the image in a sample to a given size.
+    """Rescale the image in a sample to a given size. LGTM.
 
     Args:
         output_size (tuple or int): Desired output size. If tuple, output is
@@ -118,10 +118,12 @@ class Rescale(object):
         self.output_size = output_size
 
     def __call__(self, sample):
-        image, target = sample['image'], sample['target']
+        img_t   = sample['img_t']
+        img_tp1 = sample['img_tp1']
+        target  = sample['target_xy']
 
-        # In cv2, image.shape represents (height, width, channels).
-        h, w, channels = image.shape
+        # In cv2, image shape represents (height, width, channels).
+        h, w, channels = img_t.shape
         h, w = float(h), float(w)
         assert channels == 3, channels
 
@@ -136,10 +138,22 @@ class Rescale(object):
 
         # Daniel: tutorial said h,w but cv2.resize uses w,h ... I tested it.
         # Despite order of w,h here, for `img.shape` it's h,w,(channels). Confusing.
-        img = cv2.resize(image, (new_w, new_h))
+        img_t   = cv2.resize(img_t,   (new_w, new_h))
+        img_tp1 = cv2.resize(img_tp1, (new_w, new_h))
 
-        target = ( target[0] * (new_w / w), target[1] * (new_h / h) )
-        return {'image': img, 'target': target}
+        # Scale the target, which is the xy. Angle stays the same. For now we
+        # don't change the length as we can keep it fixed.
+        target_xy = ( target[0] * (new_w / w), target[1] * (new_h / h) )
+
+        new_sample = {
+            'img_t':      img_t,
+            'img_tp1':    img_tp1, 
+            'target_xy':  target_xy,
+            'target_l':   sample['target_l'],
+            'target_ang': sample['target_ang'],
+            'raw_ang':    sample['raw_ang'],
+        }
+        return new_sample
 
 
 class RandomCrop(object):
@@ -220,9 +234,6 @@ class CenterCrop(object):
         target_y = min( max(target_y, 0.0), new_h )
 
         return {'image': image, 'target': (target_x, target_y)}
-
-
-# TODO ABOVE
 
 
 class RandomHorizontalFlip(object):
@@ -355,10 +366,10 @@ def _save_viz(sample, idx):
     int(target_xy[0]),int(target_xy[1])
     cv2.arrowedLine(img_t, targ, goal, color=BLUE, thickness=2)
     cv2.putText(img=img_t, 
-                text="{}".format(raw_ang),
+                text="raw ang: {}".format(raw_ang),
                 org=(50,50),
                 fontFace=cv2.FONT_HERSHEY_SIMPLEX, 
-                fontScale=1, 
+                fontScale=0.75, 
                 color=GREEN,
                 thickness=2)
 
@@ -382,7 +393,7 @@ if __name__ == "__main__":
 
     # To debug transformation(s), pick any one to run, get images, and save.
     transforms_train = transforms.Compose([
-        #Rescale((256,256)),
+        Rescale((256,256)),
         #RandomCrop((224,224)),
         RandomHorizontalFlip(),
         #ToTensor(),
