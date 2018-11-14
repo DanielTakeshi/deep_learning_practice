@@ -157,7 +157,9 @@ class Rescale(object):
 
 
 class RandomCrop(object):
-    """Crop randomly the image in a sample.
+    """Crop randomly the image in a sample. LGTM.
+
+    For this, we do similar croppings for both images.
 
     Args:
         output_size (tuple or int): Desired output size. If int, square crop.
@@ -171,9 +173,11 @@ class RandomCrop(object):
             self.output_size = output_size
 
     def __call__(self, sample):
-        image, target = sample['image'], sample['target']
-        h, w, channels = image.shape
-        assert channels == 3, channels
+        img_t   = sample['img_t']
+        img_tp1 = sample['img_tp1']
+        target  = sample['target_xy']
+        h, w, channels = img_t.shape
+        assert channels == 3, img_t.shape
         h, w = float(h), float(w)
         new_h, new_w = self.output_size
 
@@ -182,8 +186,10 @@ class RandomCrop(object):
         top  = np.random.randint(0, h - new_h)
         left = np.random.randint(0, w - new_w)
 
-        image = image[top: top + new_h,
+        img_t = img_t[top: top + new_h,
                       left: left + new_w]
+        img_tp1 = img_tp1[top: top + new_h,
+                          left: left + new_w]
         target_x = target[0] - left
         target_y = target[1] - top
 
@@ -193,7 +199,15 @@ class RandomCrop(object):
         target_x = min( max(target_x, 0.0), new_w )
         target_y = min( max(target_y, 0.0), new_h )
 
-        return {'image': image, 'target': (target_x, target_y)}
+        new_sample = {
+            'img_t':      img_t,
+            'img_tp1':    img_tp1, 
+            'target_xy':  (target_x, target_y),
+            'target_l':   sample['target_l'],
+            'target_ang': sample['target_ang'],
+            'raw_ang':    sample['raw_ang'],
+        }
+        return new_sample
 
 
 class CenterCrop(object):
@@ -212,9 +226,11 @@ class CenterCrop(object):
             self.output_size = output_size
 
     def __call__(self, sample):
-        image, target = sample['image'], sample['target']
-        h, w, channels = image.shape
-        assert channels == 3, channels
+        img_t   = sample['img_t']
+        img_tp1 = sample['img_tp1']
+        target  = sample['target_xy']
+        h, w, channels = img_t.shape
+        assert channels == 3, img_t.shape
         h, w = float(h), float(w)
         new_h, new_w = self.output_size
 
@@ -224,16 +240,28 @@ class CenterCrop(object):
         top  = int((h - new_h) / 2.0)
         left = int((w - new_w) / 2.0)
 
-        image = image[top: top + new_h,
+        img_t = img_t[top: top + new_h,
                       left: left + new_w]
+        img_tp1 = img_tp1[top: top + new_h,
+                          left: left + new_w]
         target_x = target[0] - left
         target_y = target[1] - top
 
-        # Similar considerations as in `RandomCrop`.
+        # IMPORTANT! In detection, our targets could have been cropped out. To
+        # avoid this, only crop a little bit. That way we can 'approximate' it
+        # by thresholding the value to be within the image.
         target_x = min( max(target_x, 0.0), new_w )
         target_y = min( max(target_y, 0.0), new_h )
 
-        return {'image': image, 'target': (target_x, target_y)}
+        new_sample = {
+            'img_t':      img_t,
+            'img_tp1':    img_tp1, 
+            'target_xy':  (target_x, target_y),
+            'target_l':   sample['target_l'],
+            'target_ang': sample['target_ang'],
+            'raw_ang':    sample['raw_ang'],
+        }
+        return new_sample
 
 
 class RandomHorizontalFlip(object):
@@ -394,14 +422,14 @@ if __name__ == "__main__":
     # To debug transformation(s), pick any one to run, get images, and save.
     transforms_train = transforms.Compose([
         Rescale((256,256)),
-        #RandomCrop((224,224)),
+        RandomCrop((224,224)),
         RandomHorizontalFlip(),
         #ToTensor(),
         #Normalize(MEAN, STD),
     ])
     transforms_valid = transforms.Compose([
-        #Rescale((256,256)),
-        #CenterCrop((224,224)),
+        Rescale((256,256)),
+        CenterCrop((224,224)),
         #ToTensor(),
         #Normalize(MEAN, STD),
     ])
