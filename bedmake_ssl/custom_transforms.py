@@ -443,9 +443,9 @@ if __name__ == "__main__":
     print("len(train):  {}".format(len(gdata_t)))
     print("len(valid):  {}".format(len(gdata_v)))
 
-    for i in range(len(gdata_t)):
-        _save_viz(gdata_t[i], idx=i)
-    for i in range(len(gdata_v)):
-        # idx only means we change file names so it doesn't conflict w/earlier
-        _save_viz(gdata_v[i], idx=i+1000)
+    #for i in range(len(gdata_t)):
+    #    _save_viz(gdata_t[i], idx=i)
+    #for i in range(len(gdata_v)):
+    #    # idx only means we change file names so it doesn't conflict w/earlier
+    #    _save_viz(gdata_v[i], idx=i+1000)
 
