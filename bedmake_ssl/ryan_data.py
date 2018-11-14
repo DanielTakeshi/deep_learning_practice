@@ -13,12 +13,11 @@ import numpy as np
 from os.path import join
 
 # ------------------------------------------------------------------------------
-# Local data directory, from `prepare_data.py`.
-TARGET = 'cache_combo_v03_success_pytorch'
-
-# For the custom dataset we use.
-DATA_TRAIN_INFO = 'cache_combo_v03_pytorch/train/data_train_loader.pkl'
-DATA_VALID_INFO = 'cache_combo_v03_pytorch/valid/data_valid_loader.pkl'
+# Local data directories, from `prepare_data.py`.
+TARGET1    = 'ssldata/'
+TARGET2    = 'ssldata_pytorch/'
+TRAIN_INFO = 'ssldata_pytorch/train/data_train_loader.pkl'
+VALID_INFO = 'ssldata_pytorch/valid/data_valid_loader.pkl'
 
 # For saving images+targets from minibatches, to inspect data augmentation.
 TMPDIR1 = 'tmp_augm/'
@@ -30,9 +29,9 @@ TMPDIR2 = 'tmp_model/'
 if not os.path.exists(TMPDIR2):
     os.makedirs(TMPDIR2)
 
-# See `prepare_data.py`. Remember, we really have three channels.
-MEAN = [0.37468, 0.37468, 0.37468]
-STD  = [0.33259, 0.33259, 0.33259]
+# See output of `prepare_data.py`.
+MEAN = [0.41947472 0.40256495 0.41423752]
+STD  = [0.43009408 0.43955658 0.44744617]
 
 # Pre-trained models
 resnet18 = models.resnet18(pretrained=True)
@@ -99,15 +98,6 @@ def _save_images(inputs, labels, outputs, loss, phase):
         cv2.imwrite(fname, img)
 
 
-def _save_viz(sample, idx):
-    img, target = sample['image'], sample['target']
-    pose_int = int(target[0]),int(target[1])
-    cv2.circle(img, center=pose_int, radius=2, color=(0,0,255), thickness=-1)
-    cv2.circle(img, center=pose_int, radius=3, color=(0,0,0), thickness=1)
-    fname = join(TMPDIR1, 'example_{}.png'.format(str(idx).zfill(4)))
-    cv2.imwrite(fname, img)
-
-
 def train(model, args):
     # To debug transformation(s), pick any one to run, get images, and save.
     transforms_train = transforms.Compose([
@@ -126,12 +116,6 @@ def train(model, args):
 
     gdata_t = GraspDataset(infodir=DATA_TRAIN_INFO, transform=transforms_train)
     gdata_v = GraspDataset(infodir=DATA_VALID_INFO, transform=transforms_valid)
-
-    # Can debug here, but only works if we didn't call `ToTensor()` (+normalize).
-    #for i in range(20):
-    #    print(gdata_t[i]['target'])
-    #    _save_viz(gdata_t[i], idx=i)
-    #    _save_viz(gdata_v[i], idx=i+1000)
 
     dataloaders = {
         'train': DataLoader(gdata_t, batch_size=32, shuffle=True, num_workers=8),

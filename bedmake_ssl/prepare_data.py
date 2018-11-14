@@ -28,6 +28,9 @@ def prepare_ryan_data():
     not on images, as the data is actually (s_t, a_t, s_{t+1}). Think of it as
     iterating through actions, not images, but we have to _skip_ indices which
     correspond to any `None` actions; those indicate episode transitions.
+
+    We save the image paths. No need to adjust images any further since we
+    already have them saved in `ssldata`.
     """
     raw_data = 'ssldata/rollout.pkl'
     dir_pyt = 'ssldata_pytorch'
@@ -86,8 +89,8 @@ def prepare_ryan_data():
 
             # Don't forget! Add info to our data loaders!! We need enough info
             # to determine a full data point, which is a pair: `(input,target)`.
-            png_t   = 'd_img_{}'.format(str(t).zfill(3))
-            png_tp1 = 'd_img_{}'.format(str(t).zfill(3))
+            png_t   = 'ssldata/d_img_proc_{}.png'.format(str(t).zfill(3))   # t
+            png_tp1 = 'ssldata/d_img_proc_{}.png'.format(str(t+1).zfill(3)) # t+1
 
             # For actions just put `a_t` here and adjust in the data loader.
             if t <= train_cutoff:

@@ -3,36 +3,20 @@ My custom transforms that I use, mainly for detection and non-classification
 stuff. (If doing classification just borrow the ones from torchvision.)
 Also the dataset class.
 """
-import cv2, os, sys
+import cv2, os, sys, pickle
+from os.path import join
 import numpy as np
 import torch
+import torchvision.models as models
+from torch.utils.data import Dataset, DataLoader
+from torchvision import datasets, transforms
 from torchvision.transforms import functional as F
 
-
-class GraspDataset(Dataset):
-    """Custom dataset, inspired by Face Landmarks dataset."""
-
-    def __init__(self, infodir, transform=None):
-        self.infodir = infodir
-        with open(self.infodir, 'r') as fh:
-            self.data = pickle.load(fh)
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        """As in the face landmarks, samples are dicts with images and labels."""
-        png_path, target = self.data[idx]
-        image = cv2.imread(png_path)
-        target = ( float(target[0]), float(target[1]) )
-        sample = {'image': image, 'target': target}
-        if self.transform:
-            sample = self.transform(sample)
-        return sample
-
-
-#TODO BELOW
+RED   = (0,0,255)
+BLUE  = (255,0,0)
+GREEN = (0,255,0)
+BLACK = (0,0,0)
+WHITE = (255,255,255)
 
 class Normalize(object):
     """Normalize.
@@ -225,4 +209,138 @@ class RandomHorizontalFlip(object):
             targetx = w - target[0]
         target = (targetx, targety)
         return {'image': image, 'target': target}
+
+
+class BedGraspDataset(Dataset):
+    """Custom dataset, inspired by Face Landmarks dataset."""
+
+    def __init__(self, infodir, transform=None):
+        self.infodir = infodir
+        with open(self.infodir, 'r') as fh:
+            self.data = pickle.load(fh)
+        self.transform = transform
+
+    def __len__(self):
+        """We saved `self.data` as a list, one element per item."""
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        """
+        Each item in `self.data` gives us sufficient information about a single
+        training data point. We also need to figure out action representation.
+
+        Currently it's one-hot for the angles. Up to debate. Rope manipulation
+        paper discretized angle into 36 values (and length to 10 values).
+        Action location discretized onto a 20x20 grid. They argue that
+        classification lets for multimodality.
+        """
+        png_t, png_tp1, a_t = self.data[idx]
+        img_t   = cv2.imread(png_t)
+        img_tp1 = cv2.imread(png_tp1)
+        assert img_t is not None and img_tp1 is not None
+
+        target_xy = [
+            float(a_t['x']),
+            float(a_t['y']),
+        ]
+        target_l = [
+            float(a_t['length']) / 20.0,
+        ]
+        target_ang = [
+            float(a_t['angle'] == 0),
+            float(a_t['angle'] == 90),
+            float(a_t['angle'] == 180),
+            float(a_t['angle'] == 270),
+        ]
+
+        sample = {'img_t': img_t, 'img_tp1': img_tp1, 'target_xy': target_xy,
+                'target_l': target_l, 'target_ang':target_ang,
+                'raw_ang': a_t['angle']}
+
+        if self.transform:
+            sample = self.transform(sample)
+        return sample
+
+
+def _save_viz(sample, idx):
+    """Save current and target images into one img."""
+    img_t      = sample['img_t']
+    img_tp1    = sample['img_tp1']
+    target_xy  = sample['target_xy']
+    target_l   = sample['target_l']
+    target_ang = sample['target_ang']
+    raw_ang    = sample['raw_ang']
+
+    targ = (int(target_xy[0]), int(target_xy[1]))
+    cv2.circle(img_t, center=targ, radius=2, color=RED, thickness=-1)
+    cv2.circle(img_t, center=targ, radius=3, color=BLACK, thickness=1)
+
+    # This is the direction. Don't worry about the length, we can't easily get
+    # it in pixel space and we keep length in world-space roughly fixed anyway.
+    if target_ang[0] == 1:
+        offset = [50, 0]
+    elif target_ang[1] == 1:
+        offset = [0, -50]
+    elif target_ang[2] == 1:
+        offset = [-50, 0]
+    elif target_ang[3] == 1:
+        offset = [0, 50]
+    else:
+        raise ValueError(target_ang)
+
+    goal = (targ[0] + offset[0], targ[1] + offset[1])
+    int(target_xy[0]),int(target_xy[1])
+    cv2.arrowedLine(img_t, targ, goal, color=BLUE, thickness=2)
+    cv2.putText(img=img_t, 
+                text="{}".format(raw_ang),
+                org=(50,50),
+                fontFace=cv2.FONT_HERSHEY_SIMPLEX, 
+                fontScale=1, 
+                color=GREEN,
+                thickness=2)
+
+    # Combine images (t,tp1) together.
+    hstack = np.concatenate((img_t, img_tp1), axis=1)
+    fname = join(TMPDIR1, 'example_{}.png'.format(str(idx).zfill(4)))
+    cv2.imwrite(fname, hstack)
+
+
+if __name__ == "__main__":
+    """Use to debug transforms. In general don't use ToTensor or Normalize since
+    that won't let us save and visualize the png images.
+    """
+    # For saving images+targets from minibatches, to inspect data augmentation.
+    TMPDIR1 = 'tmp_augm/'
+    if not os.path.exists(TMPDIR1):
+        os.makedirs(TMPDIR1)
+
+    # To debug transformation(s), pick any one to run, get images, and save.
+    transforms_train = transforms.Compose([
+        #Rescale((256,256)),
+        #RandomCrop((224,224)),
+        #RandomHorizontalFlip(),
+        #ToTensor(),
+        #Normalize(MEAN, STD),
+    ])
+    transforms_valid = transforms.Compose([
+        #Rescale((256,256)),
+        #CenterCrop((224,224)),
+        #ToTensor(),
+        #Normalize(MEAN, STD),
+    ])
+
+    TRAIN_INFO = 'ssldata_pytorch/train/data_train_loader.pkl'
+    VALID_INFO = 'ssldata_pytorch/valid/data_valid_loader.pkl'
+    gdata_t = BedGraspDataset(infodir=TRAIN_INFO, transform=transforms_train)
+    gdata_v = BedGraspDataset(infodir=VALID_INFO, transform=transforms_valid)
+
+    # Can debug here, but only works if we didn't call `ToTensor()` (+normalize).
+    print("len(train):  {}".format(len(gdata_t)))
+    print("len(valid):  {}".format(len(gdata_v)))
+
+    for i in range(len(gdata_t)):
+        _save_viz(gdata_t[i], idx=i)
+    for i in range(len(gdata_v)):
+        # idx only means we change file names so it doesn't conflict w/earlier
+        _save_viz(gdata_v[i], idx=i+1000)
 
