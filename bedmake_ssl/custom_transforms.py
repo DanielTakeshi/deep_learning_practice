@@ -18,23 +18,33 @@ GREEN = (0,255,0)
 BLACK = (0,0,0)
 WHITE = (255,255,255)
 
+
 class Normalize(object):
     """Normalize.
-    
+
     https://github.com/pytorch/vision/blob/master/torchvision/transforms/transforms.py#L129
     https://github.com/pytorch/vision/blob/master/torchvision/transforms/functional.py#L157
 
-    Actually we can just call the functional ...
+    NOT TESTED
     """
     def __init__(self, mean, std):
         self.mean = mean
         self.std = std
 
     def __call__(self, sample):
-        image, target = sample['image'], sample['target']
-        assert image.shape[0] == 3, image.shape
-        image = F.normalize(image, self.mean, self.std)
-        return {'image': image, 'target': target}
+        img_t   = F.normalize(sample['img_t'],   self.mean, self.std)
+        img_tp1 = F.normalize(sample['img_tp1'], self.mean, self.std)
+        assert img_t.shape[0] == 3 and img_t.shape == img_tp1.shape, image.shape
+
+        new_sample = {
+            'img_t':      img_t,
+            'img_tp1':    img_tp1, 
+            'target_xy':  sample['target_xy'],
+            'target_l':   sample['target_l'],
+            'target_ang': sample['target_ang'],
+            'raw_ang':    sample['raw_ang'],
+        }
+        return new_sample
 
 
 class ToTensor(object):
@@ -48,24 +58,47 @@ class ToTensor(object):
 
     The first link, the transform, calls the second one, the functional. There
     are cases for ndarrays and PIL images, but we should only deal w/the former.
+
+    NOT TESTED
     """
     def __call__(self, sample):
-        image, target = sample['image'], sample['target']
-        assert isinstance(image, np.ndarray), image
-        assert isinstance(target, tuple), target
+        img_t   = sample['img_t']
+        img_tp1 = sample['img_tp1']
+        assert isinstance(img_t, np.ndarray), img_t
 
+        h, w, c = img_t.shape
         # swap color axis because
         # numpy image: H x W x C
         # torch image: C X H X W
-        image = image.transpose((2, 0, 1))
+        img_t   = img_t.transpose((2, 0, 1))
+        img_tp1 = img_tp1.transpose((2, 0, 1))
 
         # Convert to numpy, but we need to then divide by 255.
-        image  = torch.from_numpy( image )
-        target = torch.from_numpy( np.array(target) )
-        assert isinstance(image, torch.ByteTensor), image
-        image  = image.float().div(255)
-        target = target.div(255)         # these are already floats
-        return {'image': image, 'target': target}
+        img_t   = torch.from_numpy(img_t)
+        img_tp1 = torch.from_numpy(img_tp1)
+        assert isinstance(img_t, torch.ByteTensor), img_t
+        img_t   = img_t.float().div(255)
+        img_tp1 = img_tp1.float().div(255)
+
+        # The target needs to be set in an array. Note scaling!
+        # I _think_ we can scale by current width and height.
+        target = np.array([
+            sample['target_xy'][0] / float(w),
+            sample['target_xy'][1] / float(h),
+            sample['target_l'] / 20.0,
+            sample['target_ang'][0],
+            sample['target_ang'][1],
+            sample['target_ang'][2],
+            sample['target_ang'][3],
+        ])
+        label = torch.from_numpy(target)
+
+        new_sample = {
+            'img_t':   img_t,
+            'img_tp1': img_tp1, 
+            'label':   label,
+        }
+        return new_sample
 
 
 class Rescale(object):
@@ -200,7 +233,8 @@ class RandomHorizontalFlip(object):
     image size, since it might have been resized earlier.
 
     With two images, we need the images flipped _together_, and also the action
-    center changes. The direction only changes if the action was horizontal.
+    center changes. The direction only changes if the action was horizontal. Can
+    detect this with `raw_ang`, independent of our action parameterization.
     """
     def __init__(self, flipping_ratio=0.5):
         self.flipping_ratio = 0.5
@@ -209,7 +243,6 @@ class RandomHorizontalFlip(object):
         img_t      = sample['img_t']
         img_tp1    = sample['img_tp1']
         target_xy  = sample['target_xy']
-        target_l   = sample['target_l']
         target_ang = sample['target_ang']
         raw_ang    = sample['raw_ang']
 
@@ -228,10 +261,15 @@ class RandomHorizontalFlip(object):
                 assert target_ang[2] == 1, target_ang
                 target_ang = [1, 0, 0, 0]
 
-        sample = {'img_t': img_t, 'img_tp1': img_tp1, 
-                  'target_xy': target_xy, 'target_l': target_l,
-                  'target_ang': target_ang, 'raw_ang': raw_ang}
-        return sample
+        new_sample = {
+            'img_t':      img_t,
+            'img_tp1':    img_tp1, 
+            'target_xy':  target_xy,
+            'target_l':   sample['target_l'],
+            'target_ang': target_ang,
+            'raw_ang':    raw_ang,
+        }
+        return new_sample
 
 
 class BedGraspDataset(Dataset):
@@ -267,7 +305,7 @@ class BedGraspDataset(Dataset):
             float(a_t['y']),
         ]
         target_l = [
-            float(a_t['length']) / 20.0,
+            float(a_t['length'])
         ]
         target_ang = [
             float(a_t['angle'] == 0),
@@ -277,7 +315,7 @@ class BedGraspDataset(Dataset):
         ]
 
         # Keep `raw_ang` constant, as 0, 90, 180, 270. Do _not_ change it. The
-        # network will not use it. It is only for debugging.
+        # network will not use it. It is for making transforms easier to write.
         sample = {'img_t': img_t, 'img_tp1': img_tp1, 
                   'target_xy': target_xy, 'target_l': target_l,
                   'target_ang': target_ang, 'raw_ang': a_t['angle']}
@@ -334,6 +372,9 @@ if __name__ == "__main__":
     """Use to debug transforms. In general don't use ToTensor or Normalize since
     that won't let us save and visualize the png images.
     """
+    MEAN = [0.41947472, 0.40256495, 0.41423752]
+    STD  = [0.43009408, 0.43955658, 0.44744617]
+
     # For saving images+targets from minibatches, to inspect data augmentation.
     TMPDIR1 = 'tmp_augm/'
     if not os.path.exists(TMPDIR1):
@@ -343,7 +384,7 @@ if __name__ == "__main__":
     transforms_train = transforms.Compose([
         #Rescale((256,256)),
         #RandomCrop((224,224)),
-        #RandomHorizontalFlip(),
+        RandomHorizontalFlip(),
         #ToTensor(),
         #Normalize(MEAN, STD),
     ])
