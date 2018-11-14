@@ -189,26 +189,49 @@ class CenterCrop(object):
         return {'image': image, 'target': (target_x, target_y)}
 
 
-class RandomHorizontalFlip(object):
-    """AKA, a flip _about_ the *VERICAL* axis."""
+# TODO ABOVE
 
+
+class RandomHorizontalFlip(object):
+    """AKA, a flip _about_ the *VERICAL* axis. LGTM.
+
+    If we want a 'vertical' flip (the 'intuitive' meaning) then second arg in
+    `cv2.flip()` is 0, not 1.  If we flip, need to adjust label, using CURRENT
+    image size, since it might have been resized earlier.
+
+    With two images, we need the images flipped _together_, and also the action
+    center changes. The direction only changes if the action was horizontal.
+    """
     def __init__(self, flipping_ratio=0.5):
         self.flipping_ratio = 0.5
 
     def __call__(self, sample):
-        """
-        If we want a 'vertical' flip (the 'intuitive' meaning) then second arg
-        in `cv2.flip()` is 0, not 1.  If we flip, need to adjust label, using
-        CURRENT image size, since it might have been resized earlier.
-        """
-        image, target = sample['image'], sample['target']
-        targetx, targety = target
+        img_t      = sample['img_t']
+        img_tp1    = sample['img_tp1']
+        target_xy  = sample['target_xy']
+        target_l   = sample['target_l']
+        target_ang = sample['target_ang']
+        raw_ang    = sample['raw_ang']
+
+        # Careful, names should override above values from `sample` if needed.
         if np.random.rand() < self.flipping_ratio:
-            h, w, c = image.shape
-            image = cv2.flip(image, 1)
-            targetx = w - target[0]
-        target = (targetx, targety)
-        return {'image': image, 'target': target}
+            h, w, c   = img_t.shape
+            target_xy = (w - target_xy[0], target_xy[1])
+            img_t     = cv2.flip(img_t, 1)
+            img_tp1   = cv2.flip(img_tp1, 1)
+
+            # If direction is 0 or 180, we flip and reverse these targets.
+            if raw_ang == 0:
+                assert target_ang[0] == 1, target_ang
+                target_ang = [0, 0, 1, 0]
+            elif raw_ang == 180:
+                assert target_ang[2] == 1, target_ang
+                target_ang = [1, 0, 0, 0]
+
+        sample = {'img_t': img_t, 'img_tp1': img_tp1, 
+                  'target_xy': target_xy, 'target_l': target_l,
+                  'target_ang': target_ang, 'raw_ang': raw_ang}
+        return sample
 
 
 class BedGraspDataset(Dataset):
@@ -253,9 +276,11 @@ class BedGraspDataset(Dataset):
             float(a_t['angle'] == 270),
         ]
 
-        sample = {'img_t': img_t, 'img_tp1': img_tp1, 'target_xy': target_xy,
-                'target_l': target_l, 'target_ang':target_ang,
-                'raw_ang': a_t['angle']}
+        # Keep `raw_ang` constant, as 0, 90, 180, 270. Do _not_ change it. The
+        # network will not use it. It is only for debugging.
+        sample = {'img_t': img_t, 'img_tp1': img_tp1, 
+                  'target_xy': target_xy, 'target_l': target_l,
+                  'target_ang': target_ang, 'raw_ang': a_t['angle']}
 
         if self.transform:
             sample = self.transform(sample)

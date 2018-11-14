@@ -58,6 +58,11 @@ def prepare_ryan_data():
     idx_to_skip = [0, 20, 40, 60]
     train_cutoff = 60
 
+    # EDIT: ah, unfortunately some other bad cases but hopefully not a big deal
+    idx_to_skip.append(5)
+    idx_to_skip.append(30)
+    idx_to_skip.append(69)
+
     # For Ryan's data it's a simple pickle file.
     with open(raw_data, 'r') as fh:
         data = pickle.load(fh)
@@ -74,7 +79,7 @@ def prepare_ryan_data():
         for t in range(N-1):
             if t in idx_to_skip:
                 print("skipping {}".format(t))
-                assert data[t]['action'] is None
+                #assert data[t]['action'] is None # not for 4, 28, 68
                 continue
             s_t   = data[t]['image']
             a_t   = data[t]['action']
