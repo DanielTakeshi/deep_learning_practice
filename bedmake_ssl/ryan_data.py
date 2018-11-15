@@ -167,6 +167,7 @@ def train(model, args):
         print('')
         print('-' * 30)
         print('Epoch {}/{}'.format(epoch, args.num_epochs-1))
+        print('-' * 30)
 
         # Each epoch has a training and validation phase.
         # Epochs automatically tracked via the for loop over `dataloaders`.
@@ -201,7 +202,7 @@ def train(model, args):
                     if args.model_type == 1:
                         # First loss needs (B,2). Second (B,) for class _index_.
                         loss_pos = criterion_mse(out_pos, labels_pos)
-                        loss_ang = criterion_cent(out_ang, torch.squeeze(labels_ang))
+                        loss_ang = criterion_cent(out_ang, labels_ang)
                         loss = (lambda1 * loss_pos) + (lambda2 * loss_ang)
                     elif args.model_type == 2:
                         raise NotImplementedError()
@@ -232,8 +233,9 @@ def train(model, args):
                 all_train['loss_pos'].append(round(ep_loss_pos,5))
                 all_train['loss_ang'].append(round(ep_loss_ang,5))
             else:
-                #print(outputs)
-                #print(labels)
+                # Can print outputs and labels here for the last minibatch
+                # evaluated from the validation set during this epoch.
+                #print(out_pos, out_ang, labels)
                 all_valid['loss'].append(round(ep_loss,5))
                 all_valid['loss_pos'].append(round(ep_loss_pos,5))
                 all_valid['loss_ang'].append(round(ep_loss_ang,5))
@@ -246,28 +248,36 @@ def train(model, args):
 
     time_elapsed = time.time() - since
     print('\nTrained in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
-    print('Best epoch losses:  {:4f}'.format(best_loss))
+    print('Best validation epoch total loss:  {:4f}'.format(best_loss))
     print('  train:\n{}'.format(all_train['loss']))
     print('  valid:\n{}'.format(all_valid['loss']))
 
-    # Load best model weights
+    # Load best model weights, make predictions on validatoin to confirm
     model.load_state_dict(best_model_wts)
+    model.eval()
+    print("\nVisualizing performance of best model on validation set:")
 
-    ## TODO: later once we get the above finalized.
-    ## # Can make predictions on one minibatch just to confirm.
-    ## print("\nChecking performance on one validation set minibatch:")
-    ## model.eval()
-    ## for minibatch in dataloaders['valid']:
-    ##     inputs = (minibatch['image']).to(device)
-    ##     labels = (minibatch['target']).to(device)
-    ##     optimizer.zero_grad()
-    ##     with torch.set_grad_enabled(False):
-    ##         outputs = model(inputs)
-    ##         loss = criterion(outputs, labels.float())
-    ##     _save_images(inputs, labels, outputs, loss, phase='valid')
-    ##     break
+    for minibatch in dataloaders['valid']:
+        imgs_t     = (mb['img_t']).to(device)
+        imgs_tp1   = (mb['img_tp1']).to(device)
+        labels     = (mb['label']).to(device)
+        labels_pos = labels[:,:2].float()
+        labels_ang = torch.squeeze(labels[:,2:].long())
 
-    return model
+        optimizer.zero_grad()
+        with torch.set_grad_enabled(False):
+            out_pos, out_ang = policy(imgs_t, imgs_tp1)
+            _, ang_predict = torch.max(out_ang, dim=1)
+            correct_ang = (ang_predict == labels_ang).sum().item()
+
+            loss_pos = criterion_mse(out_pos, labels_pos)
+            loss_ang = criterion_cent(out_ang, labels_ang)
+            loss = (lambda1 * loss_pos) + (lambda2 * loss_ang)
+            print("  {} / {} angle accuracy".format(correct_ang, imgs_t.size(0)))
+
+        #_save_images(inputs, labels, outputs, loss, phase='valid')
+
+    return model, all_train, all_valid
 
 
 if __name__ == "__main__":
@@ -282,14 +292,15 @@ if __name__ == "__main__":
     # Train the ResNet. Then I can do stuff with it ...  I get similar best
     # validation set performance with ResNet-{18,34,50}, fyi.
     if args.model == 'resnet18':
-        model = train(resnet18, args)
+        model, stats_train, stats_valid = train(resnet18, args)
     elif args.model == 'resnet34':
-        model = train(resnet34, args)
+        model, stats_train, stats_valid = train(resnet34, args)
     elif args.model == 'resnet50':
-        model = train(resnet50, args)
+        model, stats_trai, stats_valid = train(resnet50, args)
     else:
         raise ValueError(args.model)
 
     # Save model in appropriate directory for deployment later.
-    # TODO
+    # TODO e.g., pickle.dump(...)
+    # Also save the stats_train and stats_valid for plotting.
 
