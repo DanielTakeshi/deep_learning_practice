@@ -101,20 +101,24 @@ def _save_images(inputs, labels, outputs, loss, phase):
 class PolicyNet(nn.Module):
     """The policy network, or what determines actions.
 
-    We borrow a `model` as input, which is the pre-trained ResNet stem.
-    Then we can adjust the last layer so it doesn't go to just 2 units but more
-    (e.g., 100). We can additionally define more layers after that.
+    We borrow a `model` as input, which is the pre-trained ResNet stem.  Then we
+    can adjust the last layer so it doesn't go to just 2 units but more (e.g.,
+    100). We can additionally define more layers after that. Use in my grasping
+    code (`bedmake_grasp`) and here we'll test with _two_ images as input.
     """
     def __init__(self, model):
         super(PolicyNet, self).__init__()
         num_penultimate_layer = model.fc.in_features
         model.fc = nn.Linear(num_penultimate_layer, 100)
         self.pretrained_stem = model
-        self.fc1 = nn.Linear(100, 7)
+        self.fc1 = nn.Linear(200, 7)
 
-    def forward(self, x):
-        x = self.pretrained_stem(x) # (32,3,224,224) -> (32,100)
-        x = self.fc1(x)             # (32,100) -> (32,27
+    def forward(self, x1, x2):
+        x1 = self.pretrained_stem(x1) # (32,3,224,224) -> (32,100)
+        x2 = self.pretrained_stem(x2) # (32,3,224,224) -> (32,100)
+        x = torch.cat((x1,x2), 1)     # {(32,100),(32,100)} -> (32,200)
+        x = self.fc1(x)               # (32,200) -> (32,7)
+        assert x.shape[0] == x1.shape[0] == x2.shape[0]
         return x
 
 
@@ -198,12 +202,9 @@ def train(model, args):
                 labels   = (mb['label']).to(device)    # (B,7) if all in one vec
 
                 # TODO TESTING BELOW ----------
-                #outputs1 = model(imgs_t)
-                #print(imgs_t.shape, outputs1.shape)
-                #print(outputs1)
-                outputs2 = policy(imgs_t)
-                print(imgs_t.shape, outputs2.shape)
-                print(outputs2)
+                outputs = policy(imgs_t, imgs_tp1)
+                print(imgs_t.shape, outputs.shape)
+                print(outputs)
                 # TODO STOPPING HERE, we need to get the network fixed
                 # TODO TESTING ABOVE ----------
                 sys.exit()
