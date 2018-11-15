@@ -12,14 +12,14 @@ from net import PolicyNet
 import argparse, copy, cv2, os, sys, pickle, time
 import numpy as np
 from os.path import join
+from collections import defaultdict
 
 # ------------------------------------------------------------------------------
 # Local data directories, from `prepare_data.py`.
 TARGET1    = 'ssldata/'
 TARGET2    = 'ssldata_pytorch/'
 TRAIN_INFO = 'ssldata_pytorch/train/data_train_loader.pkl'
-VALID_INFO = 'ssldata_pytorch/valid/data_valid_loader.pkl'
-
+VALID_INFO = 'ssldata_pytorch/valid/data_valid_loader.pkl' 
 # For saving images+targets from minibatches, to inspect data augmentation.
 TMPDIR1 = 'tmp_augm/'
 if not os.path.exists(TMPDIR1):
@@ -99,6 +99,15 @@ resnet50 = models.resnet50(pretrained=True)
 ##         cv2.imwrite(fname, img)
 
 
+def _log(phase, ep_loss, ep_loss_pos, ep_loss_ang, ep_correct_ang):
+    """For logging."""
+    print("  ({})".format(phase))
+    print("loss total:  {:.4f}".format(ep_loss))
+    print("loss_pos:    {:.4f}".format(ep_loss_pos))
+    print("loss_ang:    {:.4f}".format(ep_loss_ang))
+    print("correct_ang: {:.4f}".format(ep_correct_ang))
+
+
 def train(model, args):
     # To debug transformation(s), pick any one to run, get images, and save.
     transforms_train = transforms.Compose([
@@ -122,39 +131,42 @@ def train(model, args):
         'train': DataLoader(gdata_t, batch_size=32, shuffle=True, num_workers=8),
         'valid': DataLoader(gdata_v, batch_size=32, shuffle=False, num_workers=8),
     }
-    dataset_sizes = {'train': len(gdata_t), 'valid': len(gdata_v)}
+    data_sizes = {'train': float(len(gdata_t)), 'valid': float(len(gdata_v))}
 
     # ADJUST CUDA DEVICE! Be careful about multi-GPU machines like the Tritons!!
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print("\nNow training!! On device: {}".format(device))
-    print("dataset_sizes: {}\n".format(dataset_sizes))
+    print("data_sizes: {}\n".format(data_sizes))
 
     # Build policy w/pre-trained stem. Can print it to debug.
     policy = PolicyNet(model, args)
     policy = policy.to(device)
 
-    # Loss function & optimizer.
-    criterion_mse = nn.MSELoss()
+    # Optimizer and loss functions.
     if args.optim == 'sgd':
         optimizer = optim.SGD(policy.parameters(), lr=0.01, momentum=0.9)
     elif args.optim == 'adam':
         optimizer = optim.Adam(policy.parameters(), lr=0.0001)
     else:
         raise ValueError(args.optim)
+    criterion_mse  = nn.MSELoss()
+    criterion_cent = nn.CrossEntropyLoss()
 
     # --------------------------------------------------------------------------
     # FINALLY TRAINING!! Here, track loss and the 'original' loss in raw pixels.
     # --------------------------------------------------------------------------
     since = time.time()
     best_model_wts = copy.deepcopy(model.state_dict())
-    best_loss     = np.float('inf')
-    best_loss_pix = np.float('inf')
-    all_train = []
-    all_valid = []
+    best_loss = np.float('inf')
+    all_train = defaultdict(list)
+    all_valid = defaultdict(list)
+    lambda1 = 1.0
+    lambda2 = 1.0
 
     for epoch in range(args.num_epochs):
-        print('\nEpoch {}/{}'.format(epoch, args.num_epochs-1))
-        print('-' * 20)
+        print('')
+        print('-' * 30)
+        print('Epoch {}/{}'.format(epoch, args.num_epochs-1))
 
         # Each epoch has a training and validation phase.
         # Epochs automatically tracked via the for loop over `dataloaders`.
@@ -163,29 +175,37 @@ def train(model, args):
                 model.train()
             else:
                 model.eval()
-            running_loss     = 0.0
-            running_loss_pix = 0.0
+
+            # Track statistics over _this_ coming epoch (only).
+            running = defaultdict(list)
 
             # Iterate over data and labels (minibatches), by default, one epoch.
             for mb in dataloaders[phase]:
-                imgs_t   = (mb['img_t']).to(device)    # (B,3,224,224)
-                imgs_tp1 = (mb['img_tp1']).to(device)  # (B,3,224,224)
-                labels   = ((mb['label']).to(device)).float()
+                imgs_t     = (mb['img_t']).to(device)           # (B,3,224,224)
+                imgs_tp1   = (mb['img_tp1']).to(device)         # (B,3,224,224)
+                labels     = (mb['label']).to(device)           # (B,3)
+                labels_pos = labels[:,:2].float()               # (B,2)
+                labels_ang = torch.squeeze(labels[:,2:].long()) # (B,1)
 
-                # zero the parameter gradients
+                # Zero the parameter gradients!
                 optimizer.zero_grad()
 
-                # forward: track (gradient?) history _only_ if training
+                # Forward: track gradient history _only_ if training
                 with torch.set_grad_enabled(phase == 'train'):
-                    outputs = policy(imgs_t, imgs_tp1)
+                    out_pos, out_ang = policy(imgs_t, imgs_tp1)
+
+                    # Get classification accuracy from the predicted angle probs
+                    _, ang_predict = torch.max(out_ang, dim=1)
+                    correct_ang = (ang_predict == labels_ang).sum().item()
 
                     if args.model_type == 1:
-                        loss = criterion_mse(outputs, labels)
+                        # First loss needs (B,2). Second (B,) for class _index_.
+                        loss_pos = criterion_mse(out_pos, labels_pos)
+                        loss_ang = criterion_cent(out_ang, torch.squeeze(labels_ang))
+                        loss = (lambda1 * loss_pos) + (lambda2 * loss_ang)
                     elif args.model_type == 2:
                         raise NotImplementedError()
                     elif args.model_type == 3:
-                        raise NotImplementedError()
-                    elif args.model_type == 4:
                         raise NotImplementedError()
                     else:
                         raise ValueError()
@@ -194,44 +214,41 @@ def train(model, args):
                         loss.backward()
                         optimizer.step()
 
-                # TODO:  later double check this, I think this works if we want
-                # the L2 for the (224,224) images that the network actually sees.
-                # Need to also know cpu() and detach(). Also TODO: the pixels
-                # should not be multiplied by 255 but scaled by height/width ...
-
-                #targ = labels.cpu().numpy() * 255.0
-                #pred = outputs.detach().cpu().numpy() * 255.0
-                #delta = targ - pred  # shape (B,2)
-                #L2_pix = np.mean( np.linalg.norm(delta,axis=1) )
-
-                running_loss += loss.item() * imgs_t.size(0)
-                #running_loss_pix += L2_pix * imgs_t.size(0)
+                # Keep track of stats, mult by batch size since we average earlier
+                running['loss'].append(loss.item() * imgs_t.size(0))
+                running['loss_pos'].append(loss_pos.item() * imgs_t.size(0))
+                running['loss_ang'].append(loss_ang.item() * imgs_t.size(0))
+                running['correct_ang'].append(correct_ang)
 
             # We summed (not averaged) the losses earlier, so divide by full size.
-            epoch_loss = running_loss / float(dataset_sizes[phase])
-            epoch_loss_pix = running_loss_pix / float(dataset_sizes[phase])
+            ep_loss        = np.sum(running['loss']) / data_sizes[phase]
+            ep_loss_pos    = np.sum(running['loss_pos']) / data_sizes[phase]
+            ep_loss_ang    = np.sum(running['loss_ang']) / data_sizes[phase]
+            ep_correct_ang = np.sum(running['correct_ang']) / data_sizes[phase]
+            _log(phase, ep_loss, ep_loss_pos, ep_loss_ang, ep_correct_ang)
 
-            #print('({})  Loss: {:.4f}, LossPix: {:.4f}'.format(
-            #        phase, epoch_loss, epoch_loss_pix))
-            print('({})  Loss: {:.4f}'.format(phase, epoch_loss))
             if phase == 'train':
-                all_train.append(round(epoch_loss,4))
+                all_train['loss'].append(round(ep_loss,5))
+                all_train['loss_pos'].append(round(ep_loss_pos,5))
+                all_train['loss_ang'].append(round(ep_loss_ang,5))
             else:
                 #print(outputs)
                 #print(labels)
-                all_valid.append(round(epoch_loss,4))
+                all_valid['loss'].append(round(ep_loss,5))
+                all_valid['loss_pos'].append(round(ep_loss_pos,5))
+                all_valid['loss_ang'].append(round(ep_loss_ang,5))
 
             # deep copy the model, use `state_dict()`.
-            if phase == 'valid' and epoch_loss < best_loss:
-                best_loss = epoch_loss
-                best_loss_pix = epoch_loss_pix
+            if phase == 'valid' and ep_loss < best_loss:
+                best_loss = ep_loss
                 best_model_wts = copy.deepcopy(model.state_dict())
+        print('-' * 30)
 
     time_elapsed = time.time() - since
     print('\nTrained in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
-    print('Best epoch losses: {:4f}  (pix: {:.4f})'.format(best_loss, best_loss_pix))
-    print('train:  {}'.format(all_train))
-    print('valid:  {}'.format(all_valid))
+    print('Best epoch losses:  {:4f}'.format(best_loss))
+    print('  train:\n{}'.format(all_train['loss']))
+    print('  valid:\n{}'.format(all_valid['loss']))
 
     # Load best model weights
     model.load_state_dict(best_model_wts)

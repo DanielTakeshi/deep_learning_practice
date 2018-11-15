@@ -25,9 +25,9 @@ class PolicyNet(nn.Module):
         self.fc1 = nn.Linear(400, 200)
         self.fc2 = nn.Linear(200, 200)
 
-        self.fc_type1 = nn.Linear(200, 6)
         self.fc_pixel = nn.Linear(200, 2)
         self.fc_angle = nn.Linear(200, 4)
+
 
     def forward(self, x1, x2):
         x1 = self.pretrain_stem(x1) # (B,3,224,224) -> (B,200)
@@ -40,15 +40,12 @@ class PolicyNet(nn.Module):
         # Different design choices for the network
         args = self.args
         if args.model_type == 1:
-            x = self.fc_type1(x)
-            return x
-        elif args.model_type == 2:
             x_pixel = self.fc_pixel(x)
             x_angle = self.fc_angle(x)
             return (x_pixel, x_angle)
-        elif args.model_type == 3:
+        elif args.model_type == 2:
             raise NotImplementedError()
-        elif args.model_type == 4:
+        elif args.model_type == 3:
             raise NotImplementedError()
         else:
             raise ValueError(args.model_type)

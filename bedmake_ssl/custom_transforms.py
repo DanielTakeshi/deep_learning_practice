@@ -20,12 +20,7 @@ WHITE = (255,255,255)
 
 
 class Normalize(object):
-    """Normalize.
-
-    https://github.com/pytorch/vision/blob/master/torchvision/transforms/transforms.py#L129
-    https://github.com/pytorch/vision/blob/master/torchvision/transforms/functional.py#L157
-
-    NOT TESTED
+    """Normalize. LGTM but test.
     """
     def __init__(self, mean, std):
         self.mean = mean
@@ -39,10 +34,6 @@ class Normalize(object):
         new_sample = {
             'img_t':      img_t,
             'img_tp1':    img_tp1, 
-            #'target_xy':  sample['target_xy'],
-            #'target_l':   sample['target_l'],
-            #'target_ang': sample['target_ang'],
-            #'raw_ang':    sample['raw_ang'],
             'label':      sample['label'],
         }
         return new_sample
@@ -54,13 +45,7 @@ class ToTensor(object):
     Like in normal PyTorch's ToTensor() we scale pixel values to be in [0,1].
     BUT we should also scale the labels to better condition the optimization.
 
-    https://github.com/pytorch/vision/blob/master/torchvision/transforms/transforms.py#L70
-    https://github.com/pytorch/vision/blob/master/torchvision/transforms/functional.py#L38
-
-    The first link, the transform, calls the second one, the functional. There
-    are cases for ndarrays and PIL images, but we should only deal w/the former.
-
-    NOT TESTED
+    LGTM but test.
     """
     def __call__(self, sample):
         img_t   = sample['img_t']
@@ -83,14 +68,13 @@ class ToTensor(object):
 
         # The target needs to be set in an array. Note scaling!
         # I _think_ we can scale by current width and height.
+        # Also, for the angle, easier to provide the _class_.
+
         target = np.array([
             sample['target_xy'][0] / float(w),
             sample['target_xy'][1] / float(h),
             #sample['target_l'][0] / 20.0,
-            sample['target_ang'][0],
-            sample['target_ang'][1],
-            sample['target_ang'][2],
-            sample['target_ang'][3],
+            np.argmax(sample['target_ang']), # class _index_
         ])
         label = torch.from_numpy(target)
 
