@@ -2,8 +2,8 @@
 
 (Will change this doc when needed)
 
-I get this with default settings for the commit directly after
-749b86a739b2f4d91a9fed48d2220a0ef3672df3:
+I get this with default settings for commit
+1d4340ade98d315c6c7655f8aaca90ea1a6c2466 running `python ryan_data.py`.
 
 The validation loss is decreasing. But we will have to investigate this deeply.
 
