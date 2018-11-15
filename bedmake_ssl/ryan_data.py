@@ -218,8 +218,8 @@ def train(model, args):
                 #delta = targ - pred  # shape (B,2)
                 #L2_pix = np.mean( np.linalg.norm(delta,axis=1) )
 
-                running_loss += loss.item() * inputs.size(0)
-                #running_loss_pix += L2_pix * inputs.size(0)
+                running_loss += loss.item() * imgs_t.size(0)
+                #running_loss_pix += L2_pix * imgs_t.size(0)
 
             # We summed (not averaged) the losses earlier, so divide by full size.
             epoch_loss = running_loss / float(dataset_sizes[phase])
@@ -247,18 +247,19 @@ def train(model, args):
     # Load best model weights
     model.load_state_dict(best_model_wts)
 
-    # Can make predictions on one minibatch just to confirm.
-    print("\nChecking performance on one validation set minibatch:")
-    model.eval()
-    for minibatch in dataloaders['valid']:
-        inputs = (minibatch['image']).to(device)
-        labels = (minibatch['target']).to(device)
-        optimizer.zero_grad()
-        with torch.set_grad_enabled(False):
-            outputs = model(inputs)
-            loss = criterion(outputs, labels.float())
-        _save_images(inputs, labels, outputs, loss, phase='valid')
-        break
+    ## TODO: later once we get the above finalized.
+    ## # Can make predictions on one minibatch just to confirm.
+    ## print("\nChecking performance on one validation set minibatch:")
+    ## model.eval()
+    ## for minibatch in dataloaders['valid']:
+    ##     inputs = (minibatch['image']).to(device)
+    ##     labels = (minibatch['target']).to(device)
+    ##     optimizer.zero_grad()
+    ##     with torch.set_grad_enabled(False):
+    ##         outputs = model(inputs)
+    ##         loss = criterion(outputs, labels.float())
+    ##     _save_images(inputs, labels, outputs, loss, phase='valid')
+    ##     break
 
     return model
 

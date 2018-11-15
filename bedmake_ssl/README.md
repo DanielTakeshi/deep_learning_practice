@@ -1,6 +1,10 @@
 # Self-Supervised Learning (SSL)
 
-Original data from Ryan's script (with a few samples removed).
+(These results will eventually move to a different repo.)
+
+See `tentative_results.md` for some tentative results.
+
+The original data from Ryan's script (with a few samples removed).
 
 ```
 Just loaded: ssldata/rollout.pkl  (len: 81)
@@ -21,4 +25,4 @@ mean(scaled): [0.41979732 0.40260704 0.4141044 ]
 std(scaled):  [0.43067302 0.44038301 0.44804261]
 ```
 
-
+This is the first data collection he did.
