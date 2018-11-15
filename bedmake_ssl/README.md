@@ -1,6 +1,4 @@
-# Self-Supervised Learning (SSL)
-
-(These results will eventually move to a different repo.)
+# Some Self Supervision
 
 See `tentative_results.md` for some tentative results.
 
