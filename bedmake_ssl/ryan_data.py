@@ -7,6 +7,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import datasets, transforms
 from torchvision.transforms import functional as F
 import custom_transforms as CT
+from net import PolicyNet
 
 import argparse, copy, cv2, os, sys, pickle, time
 import numpy as np
@@ -98,30 +99,6 @@ resnet50 = models.resnet50(pretrained=True)
 ##         cv2.imwrite(fname, img)
 
 
-class PolicyNet(nn.Module):
-    """The policy network, or what determines actions.
-
-    We borrow a `model` as input, which is the pre-trained ResNet stem.  Then we
-    can adjust the last layer so it doesn't go to just 2 units but more (e.g.,
-    100). We can additionally define more layers after that. Use in my grasping
-    code (`bedmake_grasp`) and here we'll test with _two_ images as input.
-    """
-    def __init__(self, model):
-        super(PolicyNet, self).__init__()
-        num_penultimate_layer = model.fc.in_features
-        model.fc = nn.Linear(num_penultimate_layer, 200)
-        self.pretrained_stem = model
-        self.fc1 = nn.Linear(400, 6)
-
-    def forward(self, x1, x2):
-        x1 = self.pretrained_stem(x1) # (32,3,224,224) -> (32,200)
-        x2 = self.pretrained_stem(x2) # (32,3,224,224) -> (32,200)
-        x = torch.cat((x1,x2), 1)     # {(32,200),(32,200)} -> (32,400)
-        x = self.fc1(x)               # (32,400) -> (32,7)
-        assert x.shape[0] == x1.shape[0] == x2.shape[0]
-        return x
-
-
 def train(model, args):
     # To debug transformation(s), pick any one to run, get images, and save.
     transforms_train = transforms.Compose([
@@ -153,11 +130,11 @@ def train(model, args):
     print("dataset_sizes: {}\n".format(dataset_sizes))
 
     # Build policy w/pre-trained stem. Can print it to debug.
-    policy = PolicyNet(model)
+    policy = PolicyNet(model, args)
     policy = policy.to(device)
 
     # Loss function & optimizer.
-    criterion = nn.MSELoss()
+    criterion_mse = nn.MSELoss()
     if args.optim == 'sgd':
         optimizer = optim.SGD(policy.parameters(), lr=0.01, momentum=0.9)
     elif args.optim == 'adam':
@@ -186,7 +163,6 @@ def train(model, args):
                 model.train()
             else:
                 model.eval()
-
             running_loss     = 0.0
             running_loss_pix = 0.0
 
@@ -194,16 +170,26 @@ def train(model, args):
             for mb in dataloaders[phase]:
                 imgs_t   = (mb['img_t']).to(device)    # (B,3,224,224)
                 imgs_tp1 = (mb['img_tp1']).to(device)  # (B,3,224,224)
-                labels   = (mb['label']).to(device)    # (B,7) if all in one vec
+                labels   = ((mb['label']).to(device)).float()
 
                 # zero the parameter gradients
                 optimizer.zero_grad()
 
                 # forward: track (gradient?) history _only_ if training
-                # I need `labels.float()` even though `labels` should be a float!
                 with torch.set_grad_enabled(phase == 'train'):
                     outputs = policy(imgs_t, imgs_tp1)
-                    loss = criterion(outputs, labels.float())
+
+                    if args.model_type == 1:
+                        loss = criterion_mse(outputs, labels)
+                    elif args.model_type == 2:
+                        raise NotImplementedError()
+                    elif args.model_type == 3:
+                        raise NotImplementedError()
+                    elif args.model_type == 4:
+                        raise NotImplementedError()
+                    else:
+                        raise ValueError()
+
                     if phase == 'train':
                         loss.backward()
                         optimizer.step()
@@ -273,7 +259,7 @@ if __name__ == "__main__":
     pp.add_argument('--optim', type=str, default='adam')
     pp.add_argument('--num_epochs', type=int, default=30)
     # Rely on several options for the loss type. See README for details.
-    pp.add_argument('--loss_type', type=int, default=1)
+    pp.add_argument('--model_type', type=int, default=1)
     args = pp.parse_args() 
 
     # Train the ResNet. Then I can do stuff with it ...  I get similar best
@@ -286,3 +272,7 @@ if __name__ == "__main__":
         model = train(resnet50, args)
     else:
         raise ValueError(args.model)
+
+    # Save model in appropriate directory for deployment later.
+    # TODO
+

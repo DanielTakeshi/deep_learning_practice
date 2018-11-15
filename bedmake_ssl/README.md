@@ -31,7 +31,8 @@ This is the first data collection he did.
 
 ## Options
 
-We have several options for the architecture and loss.
+We have several options for the architecture and loss, called `model_type` in
+the command line args; here `model` is taken up with the ResNet stem stuff.
 
 All of these use the pre-trained ResNet 18-stem, where we remove the last layer
 (which was a (512-2) dense layer) and replace it with a 200-dim output. Then,
