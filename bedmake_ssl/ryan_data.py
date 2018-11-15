@@ -40,63 +40,101 @@ resnet34 = models.resnet34(pretrained=True)
 resnet50 = models.resnet50(pretrained=True)
 # ------------------------------------------------------------------------------
 
-## DO NOT USE NOW
-## def _save_images(inputs, labels, outputs, loss, phase):
-##     """Debugging the data transformations, labels, etc.
-## 
-##     OpenCV can't save if you use floats. You need: `img = img.astype(int)`.
-##     But, we also need the axes channel to be last, i.e. (height,width,channel).
-##     But PyTorch puts the channels earlier ... (channel,height,width).
-##     The raw depth images in the pickle files were of shape (480,640,3).
-## 
-##     Right now, the un-normalized images and predictions are for the RESIZED AND
-##     CROPPED images. Getting the 'true' un-normalized ones for the validation set
-##     can be done, but the training ones will require some knowledge of what we
-##     used for random cropping.
-##     """
-##     # Extract numpy tensor on the CPU.
-##     inputs = inputs.cpu().numpy()
-##     labels = labels.cpu().numpy()
-##     preds  = outputs.cpu().numpy()
-## 
-##     # Iterate through all (data-augmented) images in minibatch and save.
-##     for b in range(inputs.shape[0]):
-##         img  = inputs[b,:,:,:]
-##         targ = labels[b,:]
-##         pred = preds[b,:]
-## 
-##         # A good sanity check, all channels of _processed_ image have same sum.
-##         # Alsom, transpose to get 3-channel at the _end_, so shape (224,224,3).
-##         assert np.sum(img[0,:,:]) == np.sum(img[1,:,:]) == np.sum(img[2,:,:])
-##         assert img.shape == (3,224,224)
-##         img = img.transpose((1,2,0))
-## 
-##         # Undo the normalization, multiply by 255, then turn to integers.
-##         img = img*STD + MEAN
-##         img = img*255.0
-##         img = img.astype(int)
-## 
-##         # And similarly, for predictions.
-##         targ = targ*255.0
-##         pred = pred*255.0
-##         targ_int = int(targ[0]), int(targ[1])
-##         pred_int = int(pred[0]), int(pred[1])
-## 
-##         # Computing 'raw' L2, well for the (224,224) input image ...
-##         L2_pix = np.linalg.norm(targ - pred)
-##         # Later, I can do additional 'un-processing' to get truly original L2s.
-## 
-##         # Overlay prediction vs target.
-##         # Using `img` gets a weird OpenCV error, I had to add 'contiguous' here.
-##         img = np.ascontiguousarray(img, dtype=np.uint8)
-##         cv2.circle(img, center=targ_int, radius=2, color=(0,0,255), thickness=-1)
-##         cv2.circle(img, center=targ_int, radius=3, color=(0,0,0),   thickness=1)
-##         cv2.circle(img, center=pred_int, radius=2, color=(255,0,0), thickness=-1)
-##         cv2.circle(img, center=pred_int, radius=3, color=(0,255,0), thickness=1)
-## 
-##         # Inspect!
-##         fname = '{}/{}_{}_{:.0f}.png'.format(TMPDIR2, phase, str(b).zfill(4), L2_pix)
-##         cv2.imwrite(fname, img)
+
+def _save_images(imgs_t, imgs_tp1, labels_pos, labels_ang, out_pos, 
+                 out_ang, ang_predict, loss, phase='valid'):
+     """Debugging the data transforms, labels, net predictions, etc.
+ 
+     OpenCV can't save if you use floats. You need: `img = img.astype(int)`.
+     But, we also need the axes channel to be last, i.e. (height,width,channel).
+     But PyTorch puts the channels earlier ... (channel,height,width).
+     The raw depth images in the pickle files were of shape (480,640,3).
+ 
+     Right now, the un-normalized images and predictions are for the RESIZED AND
+     CROPPED images. Getting the 'true' un-normalized ones for the validation set
+     can be done, but the training ones will require some knowledge of what we
+     used for random cropping.
+     """
+     B = imgs_t.shape[0]
+     imgs_t   = imgs_t.cpu().numpy()
+     imgs_tp1 = imgs_tp1.cpu().numpy()
+
+     # Iterate through all (data-augmented) images in minibatch and save.
+     for b in range(B):
+         img_t    = imgs_t[b,:,:,:]
+         img_tp1  = imgs_tp1[b,:,:,:]
+         targ_pos = labels_pos[b,:]
+         targ_ang = labels_ang[b]
+         pred_pos = out_pos[b,:]
+         pred_ang = out_ang[b,:]
+
+         assert img_t.shape == img_tp1.shape == (3,224,224)
+         img_t   = img_t.transpose((1,2,0))
+         img_tp1 = img_tp1.transpose((1,2,0))
+         h,w,c = img_t.shape
+ 
+         # Undo the normalization, multiply by 255, then turn to integers.
+         img_t   = img_t*STD + MEAN
+         img_t   = img_t*255.0
+         img_t   = img_t.astype(int)
+         img_tp1 = img_tp1*STD + MEAN
+         img_tp1 = img_tp1*255.0
+         img_tp1 = img_tp1.astype(int)
+
+         # And similarly, for predictions.
+         targ_pos_int = int(targ_pos[0]*w), int(targ_pos[1]*h)
+         pred_pos_int = int(pred_pos[0]*w), int(pred_pos[1]*h)
+ 
+         # Computing 'raw' L2, well for the (224,224) input image ...
+         #L2_pix = np.linalg.norm(targ_pos_ing - pred_pos_int)
+         L2_pix = 0.0 # will do later
+         # Later, I can do additional 'un-processing' to get truly original L2s.
+ 
+         # Overlay prediction vs target.
+         # Using `img` gets a weird OpenCV error, I had to add 'contiguous' here.
+         img = np.ascontiguousarray(img_t, dtype=np.uint8)
+         cv2.circle(img, center=targ_pos_int, radius=2, color=(0,0,255), thickness=-1)
+         cv2.circle(img, center=targ_pos_int, radius=3, color=(0,0,0),   thickness=1)
+         cv2.circle(img, center=pred_pos_int, radius=2, color=(255,0,0), thickness=-1)
+         cv2.circle(img, center=pred_pos_int, radius=3, color=(0,255,0), thickness=1)
+ 
+         # Inspect!
+         fname = '{}/{}_{}_{:.0f}.png'.format(TMPDIR2, phase, str(b).zfill(4), L2_pix)
+         cv2.imwrite(fname, img)
+
+    # TODO: use the below code and merge it with the stuff above.
+    ## targ = (int(target_xy[0]), int(target_xy[1]))
+    ## cv2.circle(img_t, center=targ, radius=2, color=RED, thickness=-1)
+    ## cv2.circle(img_t, center=targ, radius=3, color=BLACK, thickness=1)
+
+    ## # This is the direction. Don't worry about the length, we can't easily get
+    ## # it in pixel space and we keep length in world-space roughly fixed anyway.
+    ## if target_ang[0] == 1:
+    ##     offset = [50, 0]
+    ## elif target_ang[1] == 1:
+    ##     offset = [0, -50]
+    ## elif target_ang[2] == 1:
+    ##     offset = [-50, 0]
+    ## elif target_ang[3] == 1:
+    ##     offset = [0, 50]
+    ## else:
+    ##     raise ValueError(target_ang)
+
+    ## goal = (targ[0] + offset[0], targ[1] + offset[1])
+    ## int(target_xy[0]),int(target_xy[1])
+    ## cv2.arrowedLine(img_t, targ, goal, color=BLUE, thickness=2)
+    ## cv2.putText(img=img_t, 
+    ##             text="raw ang: {}".format(raw_ang),
+    ##             org=(50,50),
+    ##             fontFace=cv2.FONT_HERSHEY_SIMPLEX, 
+    ##             fontScale=0.75, 
+    ##             color=GREEN,
+    ##             thickness=2)
+
+    ## # Combine images (t,tp1) together.
+    ## hstack = np.concatenate((img_t, img_tp1), axis=1)
+    ## fname = join(TMPDIR1, 'example_{}.png'.format(str(idx).zfill(4)))
+    ## cv2.imwrite(fname, hstack)
 
 
 def _log(phase, ep_loss, ep_loss_pos, ep_loss_ang, ep_correct_ang):
@@ -275,7 +313,8 @@ def train(model, args):
             loss = (lambda1 * loss_pos) + (lambda2 * loss_ang)
             print("  {} / {} angle accuracy".format(correct_ang, imgs_t.size(0)))
 
-        #_save_images(inputs, labels, outputs, loss, phase='valid')
+            _save_images(imgs_t, imgs_tp1, labels_pos, labels_ang, out_pos, 
+                         out_ang, ang_predict, loss, phase='valid')
 
     return model, all_train, all_valid
 
