@@ -109,15 +109,15 @@ class PolicyNet(nn.Module):
     def __init__(self, model):
         super(PolicyNet, self).__init__()
         num_penultimate_layer = model.fc.in_features
-        model.fc = nn.Linear(num_penultimate_layer, 100)
+        model.fc = nn.Linear(num_penultimate_layer, 200)
         self.pretrained_stem = model
-        self.fc1 = nn.Linear(200, 7)
+        self.fc1 = nn.Linear(400, 7)
 
     def forward(self, x1, x2):
-        x1 = self.pretrained_stem(x1) # (32,3,224,224) -> (32,100)
-        x2 = self.pretrained_stem(x2) # (32,3,224,224) -> (32,100)
-        x = torch.cat((x1,x2), 1)     # {(32,100),(32,100)} -> (32,200)
-        x = self.fc1(x)               # (32,200) -> (32,7)
+        x1 = self.pretrained_stem(x1) # (32,3,224,224) -> (32,200)
+        x2 = self.pretrained_stem(x2) # (32,3,224,224) -> (32,200)
+        x = torch.cat((x1,x2), 1)     # {(32,200),(32,200)} -> (32,400)
+        x = self.fc1(x)               # (32,400) -> (32,7)
         assert x.shape[0] == x1.shape[0] == x2.shape[0]
         return x
 
@@ -152,17 +152,12 @@ def train(model, args):
     print("\nNow training!! On device: {}".format(device))
     print("dataset_sizes: {}\n".format(dataset_sizes))
 
-    # Get things setup. Since ResNet has 1000 outputs, we need to adjust the
-    # last layer to only give two outputs (since I'm doing classification).
-    # And as usual, don't forget to add it to your correct device!!
-
-    # provide the pretrained model to the policy
+    # Build policy w/pre-trained stem. Can print it to debug.
     policy = PolicyNet(model)
     policy = policy.to(device)
-    #print(policy)
 
-    # Loss function & optimizer
-    criterion = nn.MSELoss() # will change!
+    # Loss function & optimizer. TODO change!! Can add criterions, btw.
+    criterion = nn.MSELoss()
     if args.optim == 'sgd':
         optimizer = optim.SGD(policy.parameters(), lr=0.01, momentum=0.9)
     elif args.optim == 'adam':
@@ -201,24 +196,14 @@ def train(model, args):
                 imgs_tp1 = (mb['img_tp1']).to(device)  # (B,3,224,224)
                 labels   = (mb['label']).to(device)    # (B,7) if all in one vec
 
-                # TODO TESTING BELOW ----------
-                outputs = policy(imgs_t, imgs_tp1)
-                print(imgs_t.shape, outputs.shape)
-                print(outputs)
-                # TODO STOPPING HERE, we need to get the network fixed
-                # TODO TESTING ABOVE ----------
-                sys.exit()
-
                 # zero the parameter gradients
                 optimizer.zero_grad()
 
                 # forward: track (gradient?) history _only_ if training
                 # I need `labels.float()` even though `labels` should be a float!
                 with torch.set_grad_enabled(phase == 'train'):
-                    outputs = model(inputs)
+                    outputs = policy(imgs_t, imgs_tp1)
                     loss = criterion(outputs, labels.float())
-
-                    # backward + optimize only if in training phase
                     if phase == 'train':
                         loss.backward()
                         optimizer.step()
@@ -228,13 +213,13 @@ def train(model, args):
                 # Need to also know cpu() and detach(). Also TODO: the pixels
                 # should not be multiplied by 255 but scaled by height/width ...
 
-                targ = labels.cpu().numpy() * 255.0
-                pred = outputs.detach().cpu().numpy() * 255.0
-                delta = targ - pred  # shape (B,2)
-                L2_pix = np.mean( np.linalg.norm(delta,axis=1) )
+                #targ = labels.cpu().numpy() * 255.0
+                #pred = outputs.detach().cpu().numpy() * 255.0
+                #delta = targ - pred  # shape (B,2)
+                #L2_pix = np.mean( np.linalg.norm(delta,axis=1) )
 
                 running_loss += loss.item() * inputs.size(0)
-                running_loss_pix += L2_pix * inputs.size(0)
+                #running_loss_pix += L2_pix * inputs.size(0)
 
             # We summed (not averaged) the losses earlier, so divide by full size.
             epoch_loss = running_loss / float(dataset_sizes[phase])
