@@ -86,7 +86,7 @@ class ToTensor(object):
         target = np.array([
             sample['target_xy'][0] / float(w),
             sample['target_xy'][1] / float(h),
-            sample['target_l'][0] / 20.0,
+            #sample['target_l'][0] / 20.0,
             sample['target_ang'][0],
             sample['target_ang'][1],
             sample['target_ang'][2],
@@ -150,7 +150,7 @@ class Rescale(object):
             'img_t':      img_t,
             'img_tp1':    img_tp1, 
             'target_xy':  target_xy,
-            'target_l':   sample['target_l'],
+            #'target_l':   sample['target_l'],
             'target_ang': sample['target_ang'],
             'raw_ang':    sample['raw_ang'],
         }
@@ -204,7 +204,7 @@ class RandomCrop(object):
             'img_t':      img_t,
             'img_tp1':    img_tp1, 
             'target_xy':  (target_x, target_y),
-            'target_l':   sample['target_l'],
+            #'target_l':   sample['target_l'],
             'target_ang': sample['target_ang'],
             'raw_ang':    sample['raw_ang'],
         }
@@ -258,7 +258,7 @@ class CenterCrop(object):
             'img_t':      img_t,
             'img_tp1':    img_tp1, 
             'target_xy':  (target_x, target_y),
-            'target_l':   sample['target_l'],
+            #'target_l':   sample['target_l'],
             'target_ang': sample['target_ang'],
             'raw_ang':    sample['raw_ang'],
         }
@@ -305,7 +305,7 @@ class RandomHorizontalFlip(object):
             'img_t':      img_t,
             'img_tp1':    img_tp1, 
             'target_xy':  target_xy,
-            'target_l':   sample['target_l'],
+            #'target_l':   sample['target_l'],
             'target_ang': target_ang,
             'raw_ang':    raw_ang,
         }
@@ -344,9 +344,9 @@ class BedGraspDataset(Dataset):
             float(a_t['x']),
             float(a_t['y']),
         ]
-        target_l = [
-            float(a_t['length'])
-        ]
+        #target_l = [
+        #    float(a_t['length'])
+        #]
         target_ang = [
             float(a_t['angle'] == 0),
             float(a_t['angle'] == 90),
@@ -360,7 +360,7 @@ class BedGraspDataset(Dataset):
             'img_t':      img_t,
             'img_tp1':    img_tp1, 
             'target_xy':  target_xy,
-            'target_l':   target_l,
+            #'target_l':   target_l,
             'target_ang': target_ang,
             'raw_ang':    a_t['angle']
         }
@@ -375,7 +375,7 @@ def _save_viz(sample, idx):
     img_t      = sample['img_t']
     img_tp1    = sample['img_tp1']
     target_xy  = sample['target_xy']
-    target_l   = sample['target_l']
+    #target_l   = sample['target_l']
     target_ang = sample['target_ang']
     raw_ang    = sample['raw_ang']
 

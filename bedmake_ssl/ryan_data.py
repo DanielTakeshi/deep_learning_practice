@@ -39,63 +39,63 @@ resnet34 = models.resnet34(pretrained=True)
 resnet50 = models.resnet50(pretrained=True)
 # ------------------------------------------------------------------------------
 
-
-def _save_images(inputs, labels, outputs, loss, phase):
-    """Debugging the data transformations, labels, etc.
-
-    OpenCV can't save if you use floats. You need: `img = img.astype(int)`.
-    But, we also need the axes channel to be last, i.e. (height,width,channel).
-    But PyTorch puts the channels earlier ... (channel,height,width).
-    The raw depth images in the pickle files were of shape (480,640,3).
-
-    Right now, the un-normalized images and predictions are for the RESIZED AND
-    CROPPED images. Getting the 'true' un-normalized ones for the validation set
-    can be done, but the training ones will require some knowledge of what we
-    used for random cropping.
-    """
-    # Extract numpy tensor on the CPU.
-    inputs = inputs.cpu().numpy()
-    labels = labels.cpu().numpy()
-    preds  = outputs.cpu().numpy()
-
-    # Iterate through all (data-augmented) images in minibatch and save.
-    for b in range(inputs.shape[0]):
-        img  = inputs[b,:,:,:]
-        targ = labels[b,:]
-        pred = preds[b,:]
-
-        # A good sanity check, all channels of _processed_ image have same sum.
-        # Alsom, transpose to get 3-channel at the _end_, so shape (224,224,3).
-        assert np.sum(img[0,:,:]) == np.sum(img[1,:,:]) == np.sum(img[2,:,:])
-        assert img.shape == (3,224,224)
-        img = img.transpose((1,2,0))
-
-        # Undo the normalization, multiply by 255, then turn to integers.
-        img = img*STD + MEAN
-        img = img*255.0
-        img = img.astype(int)
-
-        # And similarly, for predictions.
-        targ = targ*255.0
-        pred = pred*255.0
-        targ_int = int(targ[0]), int(targ[1])
-        pred_int = int(pred[0]), int(pred[1])
-
-        # Computing 'raw' L2, well for the (224,224) input image ...
-        L2_pix = np.linalg.norm(targ - pred)
-        # Later, I can do additional 'un-processing' to get truly original L2s.
-
-        # Overlay prediction vs target.
-        # Using `img` gets a weird OpenCV error, I had to add 'contiguous' here.
-        img = np.ascontiguousarray(img, dtype=np.uint8)
-        cv2.circle(img, center=targ_int, radius=2, color=(0,0,255), thickness=-1)
-        cv2.circle(img, center=targ_int, radius=3, color=(0,0,0),   thickness=1)
-        cv2.circle(img, center=pred_int, radius=2, color=(255,0,0), thickness=-1)
-        cv2.circle(img, center=pred_int, radius=3, color=(0,255,0), thickness=1)
-
-        # Inspect!
-        fname = '{}/{}_{}_{:.0f}.png'.format(TMPDIR2, phase, str(b).zfill(4), L2_pix)
-        cv2.imwrite(fname, img)
+## DO NOT USE NOW
+## def _save_images(inputs, labels, outputs, loss, phase):
+##     """Debugging the data transformations, labels, etc.
+## 
+##     OpenCV can't save if you use floats. You need: `img = img.astype(int)`.
+##     But, we also need the axes channel to be last, i.e. (height,width,channel).
+##     But PyTorch puts the channels earlier ... (channel,height,width).
+##     The raw depth images in the pickle files were of shape (480,640,3).
+## 
+##     Right now, the un-normalized images and predictions are for the RESIZED AND
+##     CROPPED images. Getting the 'true' un-normalized ones for the validation set
+##     can be done, but the training ones will require some knowledge of what we
+##     used for random cropping.
+##     """
+##     # Extract numpy tensor on the CPU.
+##     inputs = inputs.cpu().numpy()
+##     labels = labels.cpu().numpy()
+##     preds  = outputs.cpu().numpy()
+## 
+##     # Iterate through all (data-augmented) images in minibatch and save.
+##     for b in range(inputs.shape[0]):
+##         img  = inputs[b,:,:,:]
+##         targ = labels[b,:]
+##         pred = preds[b,:]
+## 
+##         # A good sanity check, all channels of _processed_ image have same sum.
+##         # Alsom, transpose to get 3-channel at the _end_, so shape (224,224,3).
+##         assert np.sum(img[0,:,:]) == np.sum(img[1,:,:]) == np.sum(img[2,:,:])
+##         assert img.shape == (3,224,224)
+##         img = img.transpose((1,2,0))
+## 
+##         # Undo the normalization, multiply by 255, then turn to integers.
+##         img = img*STD + MEAN
+##         img = img*255.0
+##         img = img.astype(int)
+## 
+##         # And similarly, for predictions.
+##         targ = targ*255.0
+##         pred = pred*255.0
+##         targ_int = int(targ[0]), int(targ[1])
+##         pred_int = int(pred[0]), int(pred[1])
+## 
+##         # Computing 'raw' L2, well for the (224,224) input image ...
+##         L2_pix = np.linalg.norm(targ - pred)
+##         # Later, I can do additional 'un-processing' to get truly original L2s.
+## 
+##         # Overlay prediction vs target.
+##         # Using `img` gets a weird OpenCV error, I had to add 'contiguous' here.
+##         img = np.ascontiguousarray(img, dtype=np.uint8)
+##         cv2.circle(img, center=targ_int, radius=2, color=(0,0,255), thickness=-1)
+##         cv2.circle(img, center=targ_int, radius=3, color=(0,0,0),   thickness=1)
+##         cv2.circle(img, center=pred_int, radius=2, color=(255,0,0), thickness=-1)
+##         cv2.circle(img, center=pred_int, radius=3, color=(0,255,0), thickness=1)
+## 
+##         # Inspect!
+##         fname = '{}/{}_{}_{:.0f}.png'.format(TMPDIR2, phase, str(b).zfill(4), L2_pix)
+##         cv2.imwrite(fname, img)
 
 
 class PolicyNet(nn.Module):
@@ -111,7 +111,7 @@ class PolicyNet(nn.Module):
         num_penultimate_layer = model.fc.in_features
         model.fc = nn.Linear(num_penultimate_layer, 200)
         self.pretrained_stem = model
-        self.fc1 = nn.Linear(400, 7)
+        self.fc1 = nn.Linear(400, 6)
 
     def forward(self, x1, x2):
         x1 = self.pretrained_stem(x1) # (32,3,224,224) -> (32,200)
@@ -156,7 +156,7 @@ def train(model, args):
     policy = PolicyNet(model)
     policy = policy.to(device)
 
-    # Loss function & optimizer. TODO change!! Can add criterions, btw.
+    # Loss function & optimizer.
     criterion = nn.MSELoss()
     if args.optim == 'sgd':
         optimizer = optim.SGD(policy.parameters(), lr=0.01, momentum=0.9)
@@ -225,11 +225,14 @@ def train(model, args):
             epoch_loss = running_loss / float(dataset_sizes[phase])
             epoch_loss_pix = running_loss_pix / float(dataset_sizes[phase])
 
-            print('({})  Loss: {:.4f}, LossPix: {:.4f}'.format(
-                    phase, epoch_loss, epoch_loss_pix))
+            #print('({})  Loss: {:.4f}, LossPix: {:.4f}'.format(
+            #        phase, epoch_loss, epoch_loss_pix))
+            print('({})  Loss: {:.4f}'.format(phase, epoch_loss))
             if phase == 'train':
                 all_train.append(round(epoch_loss,4))
             else:
+                #print(outputs)
+                #print(labels)
                 all_valid.append(round(epoch_loss,4))
 
             # deep copy the model, use `state_dict()`.
@@ -268,7 +271,9 @@ if __name__ == "__main__":
     pp = argparse.ArgumentParser()
     pp.add_argument('--model', type=str, default='resnet18')
     pp.add_argument('--optim', type=str, default='adam')
-    pp.add_argument('--num_epochs', type=int, default=20)
+    pp.add_argument('--num_epochs', type=int, default=30)
+    # Rely on several options for the loss type. See README for details.
+    pp.add_argument('--loss_type', type=int, default=1)
     args = pp.parse_args() 
 
     # Train the ResNet. Then I can do stuff with it ...  I get similar best
