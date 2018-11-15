@@ -98,6 +98,26 @@ def _save_images(inputs, labels, outputs, loss, phase):
         cv2.imwrite(fname, img)
 
 
+class PolicyNet(nn.Module):
+    """The policy network, or what determines actions.
+
+    We borrow a `model` as input, which is the pre-trained ResNet stem.
+    Then we can adjust the last layer so it doesn't go to just 2 units but more
+    (e.g., 100). We can additionally define more layers after that.
+    """
+    def __init__(self, model):
+        super(PolicyNet, self).__init__()
+        num_penultimate_layer = model.fc.in_features
+        model.fc = nn.Linear(num_penultimate_layer, 100)
+        self.pretrained_stem = model
+        self.fc1 = nn.Linear(100, 7)
+
+    def forward(self, x):
+        x = self.pretrained_stem(x) # (32,3,224,224) -> (32,100)
+        x = self.fc1(x)             # (32,100) -> (32,27
+        return x
+
+
 def train(model, args):
     # To debug transformation(s), pick any one to run, get images, and save.
     transforms_train = transforms.Compose([
@@ -131,16 +151,18 @@ def train(model, args):
     # Get things setup. Since ResNet has 1000 outputs, we need to adjust the
     # last layer to only give two outputs (since I'm doing classification).
     # And as usual, don't forget to add it to your correct device!!
-    num_penultimate_layer = model.fc.in_features
-    model.fc = nn.Linear(num_penultimate_layer, 2)
-    model = model.to(device)
+
+    # provide the pretrained model to the policy
+    policy = PolicyNet(model)
+    policy = policy.to(device)
+    #print(policy)
 
     # Loss function & optimizer
-    criterion = nn.MSELoss()
+    criterion = nn.MSELoss() # will change!
     if args.optim == 'sgd':
-        optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+        optimizer = optim.SGD(policy.parameters(), lr=0.01, momentum=0.9)
     elif args.optim == 'adam':
-        optimizer = optim.Adam(model.parameters(), lr=0.0001)
+        optimizer = optim.Adam(policy.parameters(), lr=0.0001)
     else:
         raise ValueError(args.optim)
 
@@ -171,18 +193,26 @@ def train(model, args):
 
             # Iterate over data and labels (minibatches), by default, one epoch.
             for mb in dataloaders[phase]:
-                input_t   = (mb['img_t']).to(device)    # (B,3,224,224)
-                input_tp1 = (mb['img_tp1']).to(device)  # (B,3,224,224)
-                labels    = (mb['label']).to(device)    # (B,7) if all in one vec
+                imgs_t   = (mb['img_t']).to(device)    # (B,3,224,224)
+                imgs_tp1 = (mb['img_tp1']).to(device)  # (B,3,224,224)
+                labels   = (mb['label']).to(device)    # (B,7) if all in one vec
 
+                # TODO TESTING BELOW ----------
+                #outputs1 = model(imgs_t)
+                #print(imgs_t.shape, outputs1.shape)
+                #print(outputs1)
+                outputs2 = policy(imgs_t)
+                print(imgs_t.shape, outputs2.shape)
+                print(outputs2)
                 # TODO STOPPING HERE, we need to get the network fixed
+                # TODO TESTING ABOVE ----------
                 sys.exit()
 
                 # zero the parameter gradients
                 optimizer.zero_grad()
 
                 # forward: track (gradient?) history _only_ if training
-                # Confused, I need `labels.float()` even though `labels` should be a float!
+                # I need `labels.float()` even though `labels` should be a float!
                 with torch.set_grad_enabled(phase == 'train'):
                     outputs = model(inputs)
                     loss = criterion(outputs, labels.float())
@@ -194,7 +224,8 @@ def train(model, args):
 
                 # TODO:  later double check this, I think this works if we want
                 # the L2 for the (224,224) images that the network actually sees.
-                # Need to also know cpu() and detach().
+                # Need to also know cpu() and detach(). Also TODO: the pixels
+                # should not be multiplied by 255 but scaled by height/width ...
 
                 targ = labels.cpu().numpy() * 255.0
                 pred = outputs.detach().cpu().numpy() * 255.0
