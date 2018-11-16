@@ -38,103 +38,118 @@ STD  = [0.43067302, 0.44038301, 0.44804261]
 resnet18 = models.resnet18(pretrained=True)
 resnet34 = models.resnet34(pretrained=True)
 resnet50 = models.resnet50(pretrained=True)
+
+RED   = (0,0,255)
+BLUE  = (255,0,0)
+GREEN = (0,255,0)
+BLACK = (0,0,0)
+WHITE = (255,255,255)
 # ------------------------------------------------------------------------------
 
 
 def _save_images(imgs_t, imgs_tp1, labels_pos, labels_ang, out_pos, 
                  out_ang, ang_predict, loss, phase='valid'):
-     """Debugging the data transforms, labels, net predictions, etc.
+    """Debugging the data transforms, labels, net predictions, etc.
  
-     OpenCV can't save if you use floats. You need: `img = img.astype(int)`.
-     But, we also need the axes channel to be last, i.e. (height,width,channel).
-     But PyTorch puts the channels earlier ... (channel,height,width).
-     The raw depth images in the pickle files were of shape (480,640,3).
+    OpenCV can't save if you use floats. You need: `img = img.astype(int)`.
+    But, we also need the axes channel to be last, i.e. (height,width,channel).
+    But PyTorch puts the channels earlier ... (channel,height,width).
+    The raw depth images in the pickle files were of shape (480,640,3).
  
-     Right now, the un-normalized images and predictions are for the RESIZED AND
-     CROPPED images. Getting the 'true' un-normalized ones for the validation set
-     can be done, but the training ones will require some knowledge of what we
-     used for random cropping.
-     """
-     B = imgs_t.shape[0]
-     imgs_t   = imgs_t.cpu().numpy()
-     imgs_tp1 = imgs_tp1.cpu().numpy()
+    Right now, the un-normalized images and predictions are for the RESIZED AND
+    CROPPED images. Getting the 'true' un-normalized ones for the validation set
+    can be done, but the training ones will require some knowledge of what we
+    used for random cropping.
+    """
+    B = imgs_t.shape[0]
+    imgs_t   = imgs_t.cpu().numpy()
+    imgs_tp1 = imgs_tp1.cpu().numpy()
 
-     # Iterate through all (data-augmented) images in minibatch and save.
-     for b in range(B):
-         img_t    = imgs_t[b,:,:,:]
-         img_tp1  = imgs_tp1[b,:,:,:]
-         targ_pos = labels_pos[b,:]
-         targ_ang = labels_ang[b]
-         pred_pos = out_pos[b,:]
-         pred_ang = out_ang[b,:]
+    # Iterate through all (data-augmented) images in minibatch and save.
+    for b in range(B):
+        img_t    = imgs_t[b,:,:,:]
+        img_tp1  = imgs_tp1[b,:,:,:]
+        targ_pos = labels_pos[b,:]
+        targ_ang = labels_ang[b]
+        pred_pos = out_pos[b,:]
+        # the argmax, i.e., not the logits (those are in `out_ang`)
+        pred_ang = ang_predict[b]
 
-         assert img_t.shape == img_tp1.shape == (3,224,224)
-         img_t   = img_t.transpose((1,2,0))
-         img_tp1 = img_tp1.transpose((1,2,0))
-         h,w,c = img_t.shape
+        assert img_t.shape == img_tp1.shape == (3,224,224)
+        img_t   = img_t.transpose((1,2,0))
+        img_tp1 = img_tp1.transpose((1,2,0))
+        h,w,c = img_t.shape
  
-         # Undo the normalization, multiply by 255, then turn to integers.
-         img_t   = img_t*STD + MEAN
-         img_t   = img_t*255.0
-         img_t   = img_t.astype(int)
-         img_tp1 = img_tp1*STD + MEAN
-         img_tp1 = img_tp1*255.0
-         img_tp1 = img_tp1.astype(int)
+        # Undo the normalization, multiply by 255, then turn to integers.
+        img_t   = img_t*STD + MEAN
+        img_t   = img_t*255.0
+        img_t   = img_t.astype(int)
+        img_tp1 = img_tp1*STD + MEAN
+        img_tp1 = img_tp1*255.0
+        img_tp1 = img_tp1.astype(int)
 
-         # And similarly, for predictions.
-         targ_pos_int = int(targ_pos[0]*w), int(targ_pos[1]*h)
-         pred_pos_int = int(pred_pos[0]*w), int(pred_pos[1]*h)
+        # And similarly, for predictions. This is the (x,y) grasp point.
+        targ_pos_int = int(targ_pos[0]*w), int(targ_pos[1]*h)
+        pred_pos_int = int(pred_pos[0]*w), int(pred_pos[1]*h)
  
-         # Computing 'raw' L2, well for the (224,224) input image ...
-         #L2_pix = np.linalg.norm(targ_pos_ing - pred_pos_int)
-         L2_pix = 0.0 # will do later
-         # Later, I can do additional 'un-processing' to get truly original L2s.
+        # Computing 'raw' L2, well for the (224,224) input image ...
+        #L2_pix = np.linalg.norm(targ_pos_ing - pred_pos_int)
+        L2_pix = 0.0 # will do later
+        # Later, I can do additional 'un-processing' to get truly original L2s.
  
-         # Overlay prediction vs target.
-         # Using `img` gets a weird OpenCV error, I had to add 'contiguous' here.
-         img = np.ascontiguousarray(img_t, dtype=np.uint8)
-         cv2.circle(img, center=targ_pos_int, radius=2, color=(0,0,255), thickness=-1)
-         cv2.circle(img, center=targ_pos_int, radius=3, color=(0,0,0),   thickness=1)
-         cv2.circle(img, center=pred_pos_int, radius=2, color=(255,0,0), thickness=-1)
-         cv2.circle(img, center=pred_pos_int, radius=3, color=(0,255,0), thickness=1)
- 
-         # Inspect!
-         fname = '{}/{}_{}_{:.0f}.png'.format(TMPDIR2, phase, str(b).zfill(4), L2_pix)
-         cv2.imwrite(fname, img)
+        # Overlay prediction vs target.
+        # Using `img` gets a weird OpenCV error, I had to add 'contiguous' here.
+        img = np.ascontiguousarray(img_t, dtype=np.uint8)
+        cv2.circle(img, center=targ_pos_int, radius=2, color=(0,0,255), thickness=-1)
+        cv2.circle(img, center=targ_pos_int, radius=3, color=(0,0,0),   thickness=1)
+        cv2.circle(img, center=pred_pos_int, radius=2, color=(255,0,0), thickness=-1)
+        cv2.circle(img, center=pred_pos_int, radius=3, color=(0,255,0), thickness=1)
 
-    # TODO: use the below code and merge it with the stuff above.
-    ## targ = (int(target_xy[0]), int(target_xy[1]))
-    ## cv2.circle(img_t, center=targ, radius=2, color=RED, thickness=-1)
-    ## cv2.circle(img_t, center=targ, radius=3, color=BLACK, thickness=1)
+        # This is the direction. Don't worry about the length, we can't easily get
+        # it in pixel space and we keep length in world-space roughly fixed anyway.
+        if targ_ang == 0:
+            targ_offset = [50, 0]
+        elif targ_ang == 1:
+            targ_offset = [0, -50]
+        elif targ_ang == 2:
+            targ_offset = [-50, 0]
+        elif targ_ang == 3:
+            targ_offset = [0, 50]
+        else:
+            raise ValueError(targ_ang)
+        if pred_ang == 0:
+            pred_offset = [50, 0]
+        elif pred_ang == 1:
+            pred_offset = [0, -50]
+        elif pred_ang == 2:
+            pred_offset = [-50, 0]
+        elif pred_ang == 3:
+            pred_offset = [0, 50]
+        else:
+            raise ValueError(target_ang)
 
-    ## # This is the direction. Don't worry about the length, we can't easily get
-    ## # it in pixel space and we keep length in world-space roughly fixed anyway.
-    ## if target_ang[0] == 1:
-    ##     offset = [50, 0]
-    ## elif target_ang[1] == 1:
-    ##     offset = [0, -50]
-    ## elif target_ang[2] == 1:
-    ##     offset = [-50, 0]
-    ## elif target_ang[3] == 1:
-    ##     offset = [0, 50]
-    ## else:
-    ##     raise ValueError(target_ang)
+        # Draw both target direction and predicted direction
+        targ_goal = (targ_pos_int[0] + targ_offset[0], targ_pos_int[1] + targ_offset[1])
+        pred_goal = (pred_pos_int[0] + pred_offset[0], pred_pos_int[1] + pred_offset[1])
+        cv2.arrowedLine(img, targ_pos_int, targ_goal, color=BLUE, thickness=2)
+        cv2.arrowedLine(img, pred_pos_int, pred_goal, color=GREEN, thickness=2)
 
-    ## goal = (targ[0] + offset[0], targ[1] + offset[1])
-    ## int(target_xy[0]),int(target_xy[1])
-    ## cv2.arrowedLine(img_t, targ, goal, color=BLUE, thickness=2)
-    ## cv2.putText(img=img_t, 
-    ##             text="raw ang: {}".format(raw_ang),
-    ##             org=(50,50),
-    ##             fontFace=cv2.FONT_HERSHEY_SIMPLEX, 
-    ##             fontScale=0.75, 
-    ##             color=GREEN,
-    ##             thickness=2)
+        cv2.putText(img=img, 
+                    text="pred pos: {}".format(pred_pos_int),
+                    org=(10,10),
+                    fontFace=cv2.FONT_HERSHEY_SIMPLEX, 
+                    fontScale=0.5, 
+                    color=GREEN,
+                    thickness=1)
 
-    ## # Combine images (t,tp1) together.
-    ## hstack = np.concatenate((img_t, img_tp1), axis=1)
-    ## fname = join(TMPDIR1, 'example_{}.png'.format(str(idx).zfill(4)))
-    ## cv2.imwrite(fname, hstack)
+        # Combine images (t,tp1) together.
+        hstack = np.concatenate((img, img_tp1), axis=1)
+
+        # Inspect!
+        fname = '{}/{}_{}_{:.0f}.png'.format(TMPDIR2, phase, str(b).zfill(4), L2_pix)
+        cv2.imwrite(fname, hstack)
+
+    print("Just finished saving validation images! Look at: {}".format(TMPDIR2))
 
 
 def _log(phase, ep_loss, ep_loss_pos, ep_loss_ang, ep_correct_ang):
