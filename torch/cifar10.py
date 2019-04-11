@@ -62,6 +62,15 @@ if __name__ == "__main__":
     net = Net()
     net.to(device)
     print("\nour net:\n{}\n".format(net))
+
+    # Huh, these all have requires_grad = False
+    for k,v in net.state_dict().items():
+        print(k, v.size(), v.requires_grad)
+    # AH, it must be the `parameters()` and how that differs from the state dict
+    # and items. These are True. :-)
+    for p in net.parameters():
+        print(p.size(), p.requires_grad)
+
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
 
