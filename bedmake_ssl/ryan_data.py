@@ -7,19 +7,19 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import datasets, transforms
 from torchvision.transforms import functional as F
 import custom_transforms as CT
+from net import PolicyNet
 
 import argparse, copy, cv2, os, sys, pickle, time
 import numpy as np
 from os.path import join
+from collections import defaultdict
 
 # ------------------------------------------------------------------------------
-# Local data directory, from `prepare_data.py`.
-TARGET = 'cache_combo_v03_success_pytorch'
-
-# For the custom dataset we use.
-DATA_TRAIN_INFO = 'cache_combo_v03_pytorch/train/data_train_loader.pkl'
-DATA_VALID_INFO = 'cache_combo_v03_pytorch/valid/data_valid_loader.pkl'
-
+# Local data directories, from `prepare_data.py`.
+TARGET1    = 'ssldata/'
+TARGET2    = 'ssldata_pytorch/'
+TRAIN_INFO = 'ssldata_pytorch/train/data_train_loader.pkl'
+VALID_INFO = 'ssldata_pytorch/valid/data_valid_loader.pkl' 
 # For saving images+targets from minibatches, to inspect data augmentation.
 TMPDIR1 = 'tmp_augm/'
 if not os.path.exists(TMPDIR1):
@@ -30,105 +30,135 @@ TMPDIR2 = 'tmp_model/'
 if not os.path.exists(TMPDIR2):
     os.makedirs(TMPDIR2)
 
-# See `prepare_data.py`. Remember, we really have three channels.
-MEAN = [0.37468, 0.37468, 0.37468]
-STD  = [0.33259, 0.33259, 0.33259]
+# See output of `prepare_data.py`.
+MEAN = [0.41979732, 0.40260704, 0.4141044 ]
+STD  = [0.43067302, 0.44038301, 0.44804261]
 
 # Pre-trained models
 resnet18 = models.resnet18(pretrained=True)
 resnet34 = models.resnet34(pretrained=True)
 resnet50 = models.resnet50(pretrained=True)
+
+RED   = (0,0,255)
+BLUE  = (255,0,0)
+GREEN = (0,255,0)
+BLACK = (0,0,0)
+WHITE = (255,255,255)
 # ------------------------------------------------------------------------------
 
 
-def _save_images(inputs, labels, outputs, loss, phase):
-    """Debugging the data transformations, labels, etc.
-
+def _save_images(imgs_t, imgs_tp1, labels_pos, labels_ang, out_pos, 
+                 out_ang, ang_predict, loss, phase='valid'):
+    """Debugging the data transforms, labels, net predictions, etc.
+ 
     OpenCV can't save if you use floats. You need: `img = img.astype(int)`.
     But, we also need the axes channel to be last, i.e. (height,width,channel).
     But PyTorch puts the channels earlier ... (channel,height,width).
     The raw depth images in the pickle files were of shape (480,640,3).
-
+ 
     Right now, the un-normalized images and predictions are for the RESIZED AND
     CROPPED images. Getting the 'true' un-normalized ones for the validation set
     can be done, but the training ones will require some knowledge of what we
     used for random cropping.
     """
-    # Extract numpy tensor on the CPU.
-    inputs = inputs.cpu().numpy()
-    labels = labels.cpu().numpy()
-    preds  = outputs.cpu().numpy()
+    B = imgs_t.shape[0]
+    imgs_t   = imgs_t.cpu().numpy()
+    imgs_tp1 = imgs_tp1.cpu().numpy()
 
     # Iterate through all (data-augmented) images in minibatch and save.
-    for b in range(inputs.shape[0]):
-        img  = inputs[b,:,:,:]
-        targ = labels[b,:]
-        pred = preds[b,:]
+    for b in range(B):
+        img_t    = imgs_t[b,:,:,:]
+        img_tp1  = imgs_tp1[b,:,:,:]
+        targ_pos = labels_pos[b,:]
+        targ_ang = labels_ang[b]
+        pred_pos = out_pos[b,:]
+        # the argmax, i.e., not the logits (those are in `out_ang`)
+        pred_ang = ang_predict[b]
 
-        # A good sanity check, all channels of _processed_ image have same sum.
-        # Alsom, transpose to get 3-channel at the _end_, so shape (224,224,3).
-        assert np.sum(img[0,:,:]) == np.sum(img[1,:,:]) == np.sum(img[2,:,:])
-        assert img.shape == (3,224,224)
-        img = img.transpose((1,2,0))
-
+        assert img_t.shape == img_tp1.shape == (3,224,224)
+        img_t   = img_t.transpose((1,2,0))
+        img_tp1 = img_tp1.transpose((1,2,0))
+        h,w,c = img_t.shape
+ 
         # Undo the normalization, multiply by 255, then turn to integers.
-        img = img*STD + MEAN
-        img = img*255.0
-        img = img.astype(int)
+        img_t   = img_t*STD + MEAN
+        img_t   = img_t*255.0
+        img_t   = img_t.astype(int)
+        img_tp1 = img_tp1*STD + MEAN
+        img_tp1 = img_tp1*255.0
+        img_tp1 = img_tp1.astype(int)
 
-        # And similarly, for predictions.
-        targ = targ*255.0
-        pred = pred*255.0
-        targ_int = int(targ[0]), int(targ[1])
-        pred_int = int(pred[0]), int(pred[1])
-
+        # And similarly, for predictions. This is the (x,y) grasp point.
+        targ_pos_int = int(targ_pos[0]*w), int(targ_pos[1]*h)
+        pred_pos_int = int(pred_pos[0]*w), int(pred_pos[1]*h)
+ 
         # Computing 'raw' L2, well for the (224,224) input image ...
-        L2_pix = np.linalg.norm(targ - pred)
+        #L2_pix = np.linalg.norm(targ_pos_ing - pred_pos_int)
+        L2_pix = 0.0 # will do later
         # Later, I can do additional 'un-processing' to get truly original L2s.
-
+ 
         # Overlay prediction vs target.
         # Using `img` gets a weird OpenCV error, I had to add 'contiguous' here.
-        img = np.ascontiguousarray(img, dtype=np.uint8)
-        cv2.circle(img, center=targ_int, radius=2, color=(0,0,255), thickness=-1)
-        cv2.circle(img, center=targ_int, radius=3, color=(0,0,0),   thickness=1)
-        cv2.circle(img, center=pred_int, radius=2, color=(255,0,0), thickness=-1)
-        cv2.circle(img, center=pred_int, radius=3, color=(0,255,0), thickness=1)
+        img = np.ascontiguousarray(img_t, dtype=np.uint8)
+        cv2.circle(img, center=targ_pos_int, radius=2, color=(0,0,255), thickness=-1)
+        cv2.circle(img, center=targ_pos_int, radius=3, color=(0,0,0),   thickness=1)
+        cv2.circle(img, center=pred_pos_int, radius=2, color=(255,0,0), thickness=-1)
+        cv2.circle(img, center=pred_pos_int, radius=3, color=(0,255,0), thickness=1)
+
+        # This is the direction. Don't worry about the length, we can't easily get
+        # it in pixel space and we keep length in world-space roughly fixed anyway.
+        if targ_ang == 0:
+            targ_offset = [50, 0]
+        elif targ_ang == 1:
+            targ_offset = [0, -50]
+        elif targ_ang == 2:
+            targ_offset = [-50, 0]
+        elif targ_ang == 3:
+            targ_offset = [0, 50]
+        else:
+            raise ValueError(targ_ang)
+        if pred_ang == 0:
+            pred_offset = [50, 0]
+        elif pred_ang == 1:
+            pred_offset = [0, -50]
+        elif pred_ang == 2:
+            pred_offset = [-50, 0]
+        elif pred_ang == 3:
+            pred_offset = [0, 50]
+        else:
+            raise ValueError(target_ang)
+
+        # Draw both target direction and predicted direction
+        targ_goal = (targ_pos_int[0] + targ_offset[0], targ_pos_int[1] + targ_offset[1])
+        pred_goal = (pred_pos_int[0] + pred_offset[0], pred_pos_int[1] + pred_offset[1])
+        cv2.arrowedLine(img, targ_pos_int, targ_goal, color=BLUE, thickness=2)
+        cv2.arrowedLine(img, pred_pos_int, pred_goal, color=GREEN, thickness=2)
+
+        cv2.putText(img=img, 
+                    text="pred pos: {}".format(pred_pos_int),
+                    org=(10,10),
+                    fontFace=cv2.FONT_HERSHEY_SIMPLEX, 
+                    fontScale=0.5, 
+                    color=GREEN,
+                    thickness=1)
+
+        # Combine images (t,tp1) together.
+        hstack = np.concatenate((img, img_tp1), axis=1)
 
         # Inspect!
         fname = '{}/{}_{}_{:.0f}.png'.format(TMPDIR2, phase, str(b).zfill(4), L2_pix)
-        cv2.imwrite(fname, img)
+        cv2.imwrite(fname, hstack)
+
+    print("Just finished saving validation images! Look at: {}".format(TMPDIR2))
 
 
-class GraspDataset(Dataset):
-    """Custom Grasp dataset, inspired by Face Landmarks dataset."""
-
-    def __init__(self, infodir, transform=None):
-        self.infodir = infodir
-        with open(self.infodir, 'r') as fh:
-            self.data = pickle.load(fh)
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        """As in the face landmarks, samples are dicts with images and labels."""
-        png_path, target = self.data[idx]
-        image = cv2.imread(png_path)
-        target = ( float(target[0]), float(target[1]) )
-        sample = {'image': image, 'target': target}
-        if self.transform:
-            sample = self.transform(sample)
-        return sample
-
-
-def _save_viz(sample, idx):
-    img, target = sample['image'], sample['target']
-    pose_int = int(target[0]),int(target[1])
-    cv2.circle(img, center=pose_int, radius=2, color=(0,0,255), thickness=-1)
-    cv2.circle(img, center=pose_int, radius=3, color=(0,0,0), thickness=1)
-    fname = join(TMPDIR1, 'example_{}.png'.format(str(idx).zfill(4)))
-    cv2.imwrite(fname, img)
+def _log(phase, ep_loss, ep_loss_pos, ep_loss_ang, ep_correct_ang):
+    """For logging."""
+    print("  ({})".format(phase))
+    print("loss total:  {:.4f}".format(ep_loss))
+    print("loss_pos:    {:.4f}".format(ep_loss_pos))
+    print("loss_ang:    {:.4f}".format(ep_loss_ang))
+    print("correct_ang: {:.4f}".format(ep_correct_ang))
 
 
 def train(model, args):
@@ -147,55 +177,50 @@ def train(model, args):
         CT.Normalize(MEAN, STD),
     ])
 
-    gdata_t = GraspDataset(infodir=DATA_TRAIN_INFO, transform=transforms_train)
-    gdata_v = GraspDataset(infodir=DATA_VALID_INFO, transform=transforms_valid)
-
-    # Can debug here, but only works if we didn't call `ToTensor()` (+normalize).
-    #for i in range(20):
-    #    print(gdata_t[i]['target'])
-    #    _save_viz(gdata_t[i], idx=i)
-    #    _save_viz(gdata_v[i], idx=i+1000)
+    gdata_t = CT.BedGraspDataset(infodir=TRAIN_INFO, transform=transforms_train)
+    gdata_v = CT.BedGraspDataset(infodir=VALID_INFO, transform=transforms_valid)
 
     dataloaders = {
         'train': DataLoader(gdata_t, batch_size=32, shuffle=True, num_workers=8),
         'valid': DataLoader(gdata_v, batch_size=32, shuffle=False, num_workers=8),
     }
-    dataset_sizes = {'train': len(gdata_t), 'valid': len(gdata_v)}
+    data_sizes = {'train': float(len(gdata_t)), 'valid': float(len(gdata_v))}
 
     # ADJUST CUDA DEVICE! Be careful about multi-GPU machines like the Tritons!!
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print("\nNow training!! On device: {}".format(device))
-    print("dataset_sizes: {}\n".format(dataset_sizes))
+    print("data_sizes: {}\n".format(data_sizes))
 
-    # Get things setup. Since ResNet has 1000 outputs, we need to adjust the
-    # last layer to only give two outputs (since I'm doing classification).
-    # And as usual, don't forget to add it to your correct device!!
-    num_penultimate_layer = model.fc.in_features
-    model.fc = nn.Linear(num_penultimate_layer, 2)
-    model = model.to(device)
+    # Build policy w/pre-trained stem. Can print it to debug.
+    policy = PolicyNet(model, args)
+    policy = policy.to(device)
 
-    # Loss function & optimizer
-    criterion = nn.MSELoss()
+    # Optimizer and loss functions.
     if args.optim == 'sgd':
-        optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+        optimizer = optim.SGD(policy.parameters(), lr=0.01, momentum=0.9)
     elif args.optim == 'adam':
-        optimizer = optim.Adam(model.parameters(), lr=0.0001)
+        optimizer = optim.Adam(policy.parameters(), lr=0.0001)
     else:
         raise ValueError(args.optim)
+    criterion_mse  = nn.MSELoss()
+    criterion_cent = nn.CrossEntropyLoss()
 
     # --------------------------------------------------------------------------
     # FINALLY TRAINING!! Here, track loss and the 'original' loss in raw pixels.
     # --------------------------------------------------------------------------
     since = time.time()
     best_model_wts = copy.deepcopy(model.state_dict())
-    best_loss     = np.float('inf')
-    best_loss_pix = np.float('inf')
-    all_train = []
-    all_valid = []
+    best_loss = np.float('inf')
+    all_train = defaultdict(list)
+    all_valid = defaultdict(list)
+    lambda1 = 1.0
+    lambda2 = 1.0
 
     for epoch in range(args.num_epochs):
-        print('\nEpoch {}/{}'.format(epoch, args.num_epochs-1))
-        print('-' * 20)
+        print('')
+        print('-' * 30)
+        print('Epoch {}/{}'.format(epoch, args.num_epochs-1))
+        print('-' * 30)
 
         # Each epoch has a training and validation phase.
         # Epochs automatically tracked via the for loop over `dataloaders`.
@@ -205,96 +230,131 @@ def train(model, args):
             else:
                 model.eval()
 
-            running_loss     = 0.0
-            running_loss_pix = 0.0
+            # Track statistics over _this_ coming epoch (only).
+            running = defaultdict(list)
 
             # Iterate over data and labels (minibatches), by default, one epoch.
-            for minibatch in dataloaders[phase]:
-                inputs = (minibatch['image']).to(device)    # (B,3,224,224)
-                labels = (minibatch['target']).to(device)   # (B,2)
+            for mb in dataloaders[phase]:
+                imgs_t     = (mb['img_t']).to(device)           # (B,3,224,224)
+                imgs_tp1   = (mb['img_tp1']).to(device)         # (B,3,224,224)
+                labels     = (mb['label']).to(device)           # (B,3)
+                labels_pos = labels[:,:2].float()               # (B,2)
+                labels_ang = torch.squeeze(labels[:,2:].long()) # (B,1)
 
-                # zero the parameter gradients
+                # Zero the parameter gradients!
                 optimizer.zero_grad()
 
-                # forward: track (gradient?) history _only_ if training
-                # Confused, I need `labels.float()` even though `labels` should be a float!
+                # Forward: track gradient history _only_ if training
                 with torch.set_grad_enabled(phase == 'train'):
-                    outputs = model(inputs)
-                    loss = criterion(outputs, labels.float())
+                    out_pos, out_ang = policy(imgs_t, imgs_tp1)
 
-                    # backward + optimize only if in training phase
+                    # Get classification accuracy from the predicted angle probs
+                    _, ang_predict = torch.max(out_ang, dim=1)
+                    correct_ang = (ang_predict == labels_ang).sum().item()
+
+                    if args.model_type == 1:
+                        # First loss needs (B,2). Second (B,) for class _index_.
+                        loss_pos = criterion_mse(out_pos, labels_pos)
+                        loss_ang = criterion_cent(out_ang, labels_ang)
+                        loss = (lambda1 * loss_pos) + (lambda2 * loss_ang)
+                    elif args.model_type == 2:
+                        raise NotImplementedError()
+                    elif args.model_type == 3:
+                        raise NotImplementedError()
+                    else:
+                        raise ValueError()
+
                     if phase == 'train':
                         loss.backward()
                         optimizer.step()
 
-                # TODO:  later double check this, I think this works if we want
-                # the L2 for the (224,224) images that the network actually sees.
-                # Need to also know cpu() and detach().
-
-                targ = labels.cpu().numpy() * 255.0
-                pred = outputs.detach().cpu().numpy() * 255.0
-                delta = targ - pred  # shape (B,2)
-                L2_pix = np.mean( np.linalg.norm(delta,axis=1) )
-
-                running_loss += loss.item() * inputs.size(0)
-                running_loss_pix += L2_pix * inputs.size(0)
+                # Keep track of stats, mult by batch size since we average earlier
+                running['loss'].append(loss.item() * imgs_t.size(0))
+                running['loss_pos'].append(loss_pos.item() * imgs_t.size(0))
+                running['loss_ang'].append(loss_ang.item() * imgs_t.size(0))
+                running['correct_ang'].append(correct_ang)
 
             # We summed (not averaged) the losses earlier, so divide by full size.
-            epoch_loss = running_loss / float(dataset_sizes[phase])
-            epoch_loss_pix = running_loss_pix / float(dataset_sizes[phase])
+            ep_loss        = np.sum(running['loss']) / data_sizes[phase]
+            ep_loss_pos    = np.sum(running['loss_pos']) / data_sizes[phase]
+            ep_loss_ang    = np.sum(running['loss_ang']) / data_sizes[phase]
+            ep_correct_ang = np.sum(running['correct_ang']) / data_sizes[phase]
+            _log(phase, ep_loss, ep_loss_pos, ep_loss_ang, ep_correct_ang)
 
-            print('({})  Loss: {:.4f}, LossPix: {:.4f}'.format(
-                    phase, epoch_loss, epoch_loss_pix))
             if phase == 'train':
-                all_train.append(round(epoch_loss,4))
+                all_train['loss'].append(round(ep_loss,5))
+                all_train['loss_pos'].append(round(ep_loss_pos,5))
+                all_train['loss_ang'].append(round(ep_loss_ang,5))
             else:
-                all_valid.append(round(epoch_loss,4))
+                # Can print outputs and labels here for the last minibatch
+                # evaluated from the validation set during this epoch.
+                #print(out_pos, out_ang, labels)
+                all_valid['loss'].append(round(ep_loss,5))
+                all_valid['loss_pos'].append(round(ep_loss_pos,5))
+                all_valid['loss_ang'].append(round(ep_loss_ang,5))
 
             # deep copy the model, use `state_dict()`.
-            if phase == 'valid' and epoch_loss < best_loss:
-                best_loss = epoch_loss
-                best_loss_pix = epoch_loss_pix
+            if phase == 'valid' and ep_loss < best_loss:
+                best_loss = ep_loss
                 best_model_wts = copy.deepcopy(model.state_dict())
+        print('-' * 30)
 
     time_elapsed = time.time() - since
     print('\nTrained in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
-    print('Best epoch losses: {:4f}  (pix: {:.4f})'.format(best_loss, best_loss_pix))
-    print('train:  {}'.format(all_train))
-    print('valid:  {}'.format(all_valid))
+    print('Best validation epoch total loss:  {:4f}'.format(best_loss))
+    print('  train:\n{}'.format(all_train['loss']))
+    print('  valid:\n{}'.format(all_valid['loss']))
 
-    # Load best model weights
+    # Load best model weights, make predictions on validatoin to confirm
     model.load_state_dict(best_model_wts)
-
-    # Can make predictions on one minibatch just to confirm.
-    print("\nChecking performance on one validation set minibatch:")
     model.eval()
+    print("\nVisualizing performance of best model on validation set:")
+
     for minibatch in dataloaders['valid']:
-        inputs = (minibatch['image']).to(device)
-        labels = (minibatch['target']).to(device)
+        imgs_t     = (mb['img_t']).to(device)
+        imgs_tp1   = (mb['img_tp1']).to(device)
+        labels     = (mb['label']).to(device)
+        labels_pos = labels[:,:2].float()
+        labels_ang = torch.squeeze(labels[:,2:].long())
+
         optimizer.zero_grad()
         with torch.set_grad_enabled(False):
-            outputs = model(inputs)
-            loss = criterion(outputs, labels.float())
-        _save_images(inputs, labels, outputs, loss, phase='valid')
-        break
+            out_pos, out_ang = policy(imgs_t, imgs_tp1)
+            _, ang_predict = torch.max(out_ang, dim=1)
+            correct_ang = (ang_predict == labels_ang).sum().item()
 
-    return model
+            loss_pos = criterion_mse(out_pos, labels_pos)
+            loss_ang = criterion_cent(out_ang, labels_ang)
+            loss = (lambda1 * loss_pos) + (lambda2 * loss_ang)
+            print("  {} / {} angle accuracy".format(correct_ang, imgs_t.size(0)))
+
+            _save_images(imgs_t, imgs_tp1, labels_pos, labels_ang, out_pos, 
+                         out_ang, ang_predict, loss, phase='valid')
+
+    return model, all_train, all_valid
 
 
 if __name__ == "__main__":
     pp = argparse.ArgumentParser()
     pp.add_argument('--model', type=str, default='resnet18')
     pp.add_argument('--optim', type=str, default='adam')
-    pp.add_argument('--num_epochs', type=int, default=20)
+    pp.add_argument('--num_epochs', type=int, default=30)
+    # Rely on several options for the loss type. See README for details.
+    pp.add_argument('--model_type', type=int, default=1)
     args = pp.parse_args() 
 
     # Train the ResNet. Then I can do stuff with it ...  I get similar best
     # validation set performance with ResNet-{18,34,50}, fyi.
     if args.model == 'resnet18':
-        model = train(resnet18, args)
+        model, stats_train, stats_valid = train(resnet18, args)
     elif args.model == 'resnet34':
-        model = train(resnet34, args)
+        model, stats_train, stats_valid = train(resnet34, args)
     elif args.model == 'resnet50':
-        model = train(resnet50, args)
+        model, stats_trai, stats_valid = train(resnet50, args)
     else:
         raise ValueError(args.model)
+
+    # Save model in appropriate directory for deployment later.
+    # TODO e.g., pickle.dump(...)
+    # Also save the stats_train and stats_valid for plotting.
+
